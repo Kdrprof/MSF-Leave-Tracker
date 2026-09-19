@@ -2,53 +2,31 @@ name: Build Android APK
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
-        
-    - name: Auto-Generate Android Architecture
+
+    - name: Generate Android Project
       run: |
+        mkdir -p app/src/main/java/com/msf/jordan/leavetracker
+        
         cat << 'EOF' > settings.gradle
         pluginManagement {
-            repositories {
-                google()
-                mavenCentral()
-                gradlePluginPortal()
-            }
+            repositories { google(); mavenCentral(); gradlePluginPortal() }
         }
         dependencyResolutionManagement {
             repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-            repositories {
-                google()
-                mavenCentral()
-            }
+            repositories { google(); mavenCentral() }
         }
         rootProject.name = "MSF-Leave-Tracker"
         include ':app'
-        EOF
-        
-        mkdir -p app/src/main/java/com/msf/jordan/leavetracker
-        
-        cat << 'EOF' > app/src/main/AndroidManifest.xml
-        <?xml version="1.0" encoding="utf-8"?>
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.msf.jordan.leavetracker">
-            <application android:allowBackup="true" android:label="MSF Tracker" android:theme="@android:style/Theme.Material.Light.NoActionBar">
-                <activity android:name=".AppLauncher" android:exported="true">
-                    <intent-filter>
-                        <action android:name="android.intent.action.MAIN" />
-                        <category android:name="android.intent.category.LAUNCHER" />
-                    </intent-filter>
-                </activity>
-            </application>
-        </manifest>
         EOF
         
         cat << 'EOF' > app/build.gradle
@@ -61,11 +39,16 @@ jobs:
             compileSdk 34
             defaultConfig {
                 applicationId "com.msf.jordan.leavetracker"
-                minSdk 24
+                minSdk 26
                 targetSdk 34
                 versionCode 1
                 versionName "1.0"
             }
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+            kotlinOptions { jvmTarget = '17' }
             buildFeatures { compose true }
             composeOptions { kotlinCompilerExtensionVersion "1.5.1" }
         }
@@ -79,28 +62,94 @@ jobs:
         }
         EOF
         
+        cat << 'EOF' > app/src/main/AndroidManifest.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="[http://schemas.android.com/apk/res/android](http://schemas.android.com/apk/res/android)" package="com.msf.jordan.leavetracker">
+            <application android:allowBackup="true" android:label="MSF Tracker">
+                <activity android:name=".AppLauncher" android:exported="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        EOF
+        
         cat << 'EOF' > app/src/main/java/com/msf/jordan/leavetracker/AppLauncher.kt
         package com.msf.jordan.leavetracker
+
         import android.os.Bundle
         import androidx.activity.ComponentActivity
         import androidx.activity.compose.setContent
+        import androidx.compose.foundation.layout.*
+        import androidx.compose.material3.*
+        import androidx.compose.runtime.Composable
+        import androidx.compose.ui.Modifier
+        import androidx.compose.ui.graphics.Color
+        import androidx.compose.ui.unit.dp
+        import androidx.compose.ui.unit.sp
+        import androidx.compose.ui.text.font.FontWeight
+        import java.time.LocalDate
+
+        enum class LeaveType(val displayName: String, val colorHex: Long, val affectsPayslip: Boolean) {
+            HOLIDAY("Holiday", 0xFF10B981, true),
+            SICK("Sick", 0xFFEF4444, false),
+            PERSONAL("Personal", 0xFF3B82F6, false),
+            TRAINING("Training", 0xFF8B5CF6, false),
+            UNPAID("Unpaid", 0xFFF97316, false),
+            COMPASSIONATE("Compassionate", 0xFF334155, false)
+        }
+
+        data class PayslipSummary(
+            val previousBalance: Double,
+            val accountedThisMonth: Double,
+            val acquiredThisMonth: Double = 2.08,
+            val remainingBalance: Double
+        )
+
+        @Composable
+        fun MainDashboardScreen(summary: PayslipSummary) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E3A8A))
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text(text = "الرصيد المتبقي (Remaining)", color = Color.White, fontSize = 18.sp)
+                        Text(
+                            text = "${summary.remainingBalance} يوم",
+                            color = Color(0xFF10B981),
+                            fontSize = 38.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Button(onClick = { }, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                        Text("إدخال يدوي")
+                    }
+                    Button(
+                        onClick = { },
+                        modifier = Modifier.weight(1f).padding(start = 8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF475569))
+                    ) {
+                        Text("مسح طلب ورقي (OCR)")
+                    }
+                }
+            }
+        }
+
         class AppLauncher : ComponentActivity() {
             override fun onCreate(savedInstanceState: Bundle?) {
                 super.onCreate(savedInstanceState)
                 setContent {
-                    val initialSummary = PayslipSummary(
-                        previousBalance = 0.0,
-                        accountedThisMonth = 0.0,
-                        acquiredThisMonth = 2.08,
-                        remainingBalance = 2.08
-                    )
-                    MainDashboardScreen(summary = initialSummary)
+                    MainDashboardScreen(summary = PayslipSummary(0.0, 0.0, 2.08, 15.5))
                 }
             }
         }
         EOF
-        
-        mv app/src/main/java/MainActivity.kt app/src/main/java/com/msf/jordan/leavetracker/ 2>/dev/null || true
 
     - name: Build APK
       run: gradle assembleDebug --no-daemon
