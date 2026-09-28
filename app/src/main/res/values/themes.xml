@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LeaveTracker" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#1E3A8A</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowBackground">@color/window_bg</item>
+    </style>
+    <color name="window_bg">#F6F7FB</color>
+    <color name="ic_bg">#1E3A8A</color>
+</resources>
