@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -32,17 +34,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.msf.jordan.leavetracker.BuildConfig
 import com.msf.jordan.leavetracker.data.BackupFormatException
 import com.msf.jordan.leavetracker.data.DecodeResult
 import com.msf.jordan.leavetracker.data.JsonCodec
 import com.msf.jordan.leavetracker.logic.IssueLevel
+import com.msf.jordan.leavetracker.logic.Reports
 import com.msf.jordan.leavetracker.logic.Rules
+import com.msf.jordan.leavetracker.logic.Tr
+import com.msf.jordan.leavetracker.logic.tr
 import java.time.DayOfWeek
 import java.time.YearMonth
-import java.time.format.TextStyle
-import java.util.Locale
+
+/** Language switch used on the first screen and in Settings. */
+@Composable
+fun LanguageSwitch(vm: AppViewModel) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        LangButton("العربية", vm.arabic, Modifier.weight(1f)) { vm.setLanguage(true) }
+        LangButton("English", !vm.arabic, Modifier.weight(1f)) { vm.setLanguage(false) }
+    }
+}
+
+@Composable
+private fun LangButton(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    if (selected) FilledTonalButton(onClick = onClick, modifier = modifier) { Text(text, fontWeight = FontWeight.Bold) }
+    else OutlinedButton(onClick = onClick, modifier = modifier) { Text(text) }
+}
 
 /** Used both for the first-run setup and the settings tab. */
 @Composable
@@ -52,7 +71,7 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
     val defaultMonth = YearMonth.from(today).minusMonths(1)
 
     var name by rememberSaveable(current) { mutableStateOf(current?.name.orEmpty()) }
-    var balance by rememberSaveable(current) { mutableStateOf(current?.let { Rules.fmtDays(it.openingBalanceX100) }.orEmpty()) }
+    var balance by rememberSaveable(current) { mutableStateOf(current?.let { Rules.fmtSlip(it.openingBalanceX100) }.orEmpty()) }
     var monthText by rememberSaveable(current) { mutableStateOf((current?.openingMonth ?: defaultMonth).toString()) }
     var weekendText by rememberSaveable(current) {
         mutableStateOf((current?.weekend ?: Rules.DEFAULT_WEEKEND).map { it.value }.sorted().joinToString(","))
@@ -63,64 +82,70 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
     val month = runCatching { YearMonth.parse(monthText) }.getOrDefault(defaultMonth)
     val weekend = weekendText.split(',').mapNotNull { it.toIntOrNull() }.filter { it in 1..7 }.map { DayOfWeek.of(it) }.toSet()
     val v = Rules.validateSettings(Rules.SettingsInput(name, balance, month, weekend), today)
-    val balanceError = v.issues.firstOrNull { it.level == IssueLevel.ERROR && it.text.contains("رصيد", ignoreCase = true) }
 
     fun save() {
         val s = v.settings ?: return
         if (vm.saveSettings(s)) {
-            vm.toast("تم حفظ الإعدادات")
+            vm.toast(tr("تم حفظ البيانات ✔", "Saved ✔"))
             onSaved()
         }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionCard(if (firstRun) "إعداد الرصيد (مرة واحدة فقط)" else "الرصيد الافتتاحي") {
+        SectionCard(if (firstRun) tr("إعداد الرصيد (مرة واحدة فقط)", "Set your balance (one time)") else tr("بياناتي والرصيد", "My details & balance")) {
             if (firstRun) {
-                Text("خذ آخر سليب راتب استلمته واكتب رصيد الإجازات السنوية الظاهر فيه. سيحسب التطبيق كل شيء بعدها تلقائياً.")
+                Text(tr(
+                    "افتح آخر سليب راتب، وفي مربع Paid leave انسخ رقم Remaining. بعدها يحسب التطبيق كل شيء تلقائياً.",
+                    "Open your latest payslip and copy «Remaining» from the Paid leave box. The app calculates everything after that.",
+                ))
                 Spacer(Modifier.height(10.dp))
             }
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it.take(60) },
-                label = { Text("اسمك (اختياري)") },
+                label = { Text(tr("اسمك (اختياري)", "Your name (optional)")) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Hint("يظهر في الشاشة الرئيسية وفي الملخص الذي تشاركه.")
+            Hint(tr("يظهر في الرئيسية وفي الكشوفات التي تشاركها.", "Shown on the home screen and on shared statements."))
             Spacer(Modifier.height(12.dp))
 
             OutlinedTextField(
                 value = balance,
                 onValueChange = { balance = it.take(8) },
-                label = { Text("رصيد الإجازات في آخر سليب (يوم)") },
-                placeholder = { Text("مثال: 12.5") },
+                label = { Text(tr("الرصيد المتبقي (Remaining) في آخر سليب", "«Remaining» on your latest payslip")) },
+                placeholder = { Text(tr("مثال: 9.13", "e.g. 9.13")) },
                 singleLine = true,
-                isError = tried && balanceError != null,
+                isError = tried && v.balanceInvalid,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth(),
             )
-            Hint("انسخه كما هو من السليب (Annual leave balance). مسموح بالكسور مثل 12.08، ويمكن استخدام الأرقام العربية.")
+            Hint(tr(
+                "الرقم الأخير في مربع Paid leave (مثل 9.13). مسموح بالكسور والأرقام العربية.",
+                "The last number in the Paid leave box (like 9.13). Decimals allowed.",
+            ))
             Spacer(Modifier.height(12.dp))
 
-            Text("شهر ذلك السليب", fontWeight = FontWeight.Bold)
+            Text(tr("شهر ذلك السليب", "Month of that payslip"), fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = { monthText = month.minusMonths(1).toString() }) { Text("السابق") }
+                OutlinedButton(onClick = { monthText = month.minusMonths(1).toString() }) { Text(tr("السابق", "Prev")) }
                 Text(
-                    "${Rules.monthLabel(month)}\n(${month.monthValue}/${month.year})",
+                    "${Tr.monthLabel(month)}\n(${month.monthValue}/${month.year})",
                     modifier = Modifier.weight(1f),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    textAlign = TextAlign.Center,
                     fontWeight = FontWeight.Bold,
                 )
-                OutlinedButton(
-                    onClick = { monthText = month.plusMonths(1).toString() },
-                    enabled = month.isBefore(YearMonth.from(today)),
-                ) { Text("التالي") }
+                OutlinedButton(onClick = { monthText = month.plusMonths(1).toString() }, enabled = month.isBefore(YearMonth.from(today))) {
+                    Text(tr("التالي", "Next"))
+                }
             }
-            Hint("الإجازات السنوية التي تعود لهذا السليب أو قبله تُعتبر محسوبة داخل الرصيد ولن تُخصم مرة ثانية. كل سليب بعده يضيف +2.08.")
+            Hint(tr(
+                "الإجازات السنوية التابعة لهذا السليب أو قبله محسوبة داخل الرصيد ولن تُخصم مرة ثانية. كل سليب بعده يضيف +2.08.",
+                "Holidays belonging to this payslip or earlier are already inside the balance. Each later payslip adds +2.08.",
+            ))
         }
 
-        SectionCard("أيام عطلة نهاية الأسبوع") {
-            val ar = Locale.forLanguageTag("ar-JO")
+        SectionCard(tr("أيام عطلة نهاية الأسبوع", "Weekend days")) {
             val order = listOf(DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY)
             order.chunked(4).forEach { row ->
                 Row {
@@ -133,19 +158,24 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
                                     weekendText = set.map { it.value }.sorted().joinToString(",")
                                 },
                             )
-                            Text(d.getDisplayName(TextStyle.SHORT, ar), style = MaterialTheme.typography.bodySmall)
+                            Text(Tr.dayShort(d), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     if (row.size < 4) Spacer(Modifier.weight((4 - row.size).toFloat()))
                 }
             }
-            Hint("الافتراضي في الأردن: الجمعة والسبت. هذه الأيام لا تُحسب عند اختيار «عدة أيام».")
+            Hint(tr(
+                "في الأردن: الجمعة والسبت. تُستخدم فقط لاقتراح عدد الأيام وتلوين التقويم.",
+                "Jordan: Friday & Saturday. Only used to suggest days and color the calendar.",
+            ))
         }
 
-        if (tried || !firstRun) {
-            val shown = if (tried) v.issues else v.issues.filter { it.level != IssueLevel.ERROR }
-            if (shown.isNotEmpty()) IssuesList(shown)
+        val shown = when {
+            tried -> v.issues
+            !firstRun -> v.issues.filter { it.level != IssueLevel.ERROR }
+            else -> emptyList()
         }
+        if (shown.isNotEmpty()) IssuesList(shown)
 
         Button(
             onClick = {
@@ -157,21 +187,21 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
                 }
             },
             modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) { Text(if (firstRun) "ابدأ" else "حفظ الإعدادات") }
+        ) { Text(if (firstRun) tr("ابدأ", "Start") else tr("حفظ البيانات", "Save")) }
     }
 
     if (confirmWarnings) {
         AlertDialog(
             onDismissRequest = { confirmWarnings = false },
-            title = { Text("تأكيد") },
+            title = { Text(tr("تأكيد", "Confirm")) },
             text = { Column { v.issues.filter { it.level == IssueLevel.WARNING }.forEach { IssueBox(it) } } },
             confirmButton = {
                 TextButton(onClick = {
                     confirmWarnings = false
                     save()
-                }) { Text("حفظ على أي حال") }
+                }) { Text(tr("حفظ على أي حال", "Save anyway")) }
             },
-            dismissButton = { TextButton(onClick = { confirmWarnings = false }) { Text("رجوع") } },
+            dismissButton = { TextButton(onClick = { confirmWarnings = false }) { Text(tr("رجوع", "Back")) } },
         )
     }
 }
@@ -180,7 +210,10 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
 fun SettingsScreen(vm: AppViewModel) {
     val ctx = LocalContext.current
     var pendingImport by remember { mutableStateOf<DecodeResult?>(null) }
-    var confirmReset by remember { mutableStateOf(0) }
+    var confirmReset by remember { mutableIntStateOf(0) }
+    val today = vm.today()
+    var reportMonthText by rememberSaveable { mutableStateOf(YearMonth.from(today).toString()) }
+    val reportMonth = runCatching { YearMonth.parse(reportMonthText) }.getOrDefault(YearMonth.from(today))
 
     fun report(err: String?) {
         if (err != null) vm.toast(err)
@@ -191,9 +224,9 @@ fun SettingsScreen(vm: AppViewModel) {
             try {
                 val os = ctx.contentResolver.openOutputStream(uri) ?: throw IllegalStateException()
                 os.use { it.write(JsonCodec.encode(vm.data).toByteArray(Charsets.UTF_8)) }
-                vm.toast("تم حفظ النسخة الاحتياطية بنجاح")
+                vm.toast(tr("تم حفظ النسخة الاحتياطية ✔", "Backup saved ✔"))
             } catch (e: Exception) {
-                vm.toast("تعذّر حفظ الملف في المكان المختار. جرّب مجلداً آخر.")
+                vm.toast(tr("تعذّر حفظ الملف في المكان المختار. جرّب مجلداً آخر.", "Couldn't save there. Try another folder."))
             }
         }
     }
@@ -201,13 +234,13 @@ fun SettingsScreen(vm: AppViewModel) {
         if (uri != null) {
             try {
                 val text = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
-                    ?: throw BackupFormatException("تعذّر فتح الملف.")
-                if (text.length > 5_000_000) throw BackupFormatException("الملف كبير جداً وليس نسخة احتياطية.")
+                    ?: throw BackupFormatException(tr("تعذّر فتح الملف.", "Couldn't open the file."))
+                if (text.length > 5_000_000) throw BackupFormatException(tr("الملف كبير جداً وليس نسخة احتياطية.", "File is too big to be a backup."))
                 pendingImport = JsonCodec.decode(text)
             } catch (e: BackupFormatException) {
-                vm.toast(e.message ?: "ملف غير صالح")
+                vm.toast(e.message ?: tr("ملف غير صالح", "Invalid file"))
             } catch (e: Exception) {
-                vm.toast("تعذّرت قراءة الملف.")
+                vm.toast(tr("تعذّرت قراءة الملف.", "Couldn't read the file."))
             }
         }
     }
@@ -219,54 +252,73 @@ fun SettingsScreen(vm: AppViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        SectionCard(tr("اللغة", "Language")) {
+            LanguageSwitch(vm)
+        }
+
         SettingsForm(vm, firstRun = false, onSaved = {})
 
-        SectionCard("النسخ الاحتياطي (مهم عند تغيير الهاتف)") {
+        SectionCard(tr("مشاركة كشف الإجازات (PDF)", "Share leave statement (PDF)")) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { reportMonthText = reportMonth.minusMonths(1).toString() }) { Text(tr("السابق", "Prev")) }
+                Text(Tr.monthLabel(reportMonth), Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
+                OutlinedButton(onClick = { reportMonthText = reportMonth.plusMonths(1).toString() }) { Text(tr("التالي", "Next")) }
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { report(Sharing.shareReport(ctx, Reports.monthly(vm.data, reportMonth, today), reportMonth.toString())) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(tr("كشف شهر ${Tr.monthLabel(reportMonth)}", "Statement for ${Tr.monthLabel(reportMonth)}")) }
+            Spacer(Modifier.height(6.dp))
+            OutlinedButton(
+                onClick = { report(Sharing.shareReport(ctx, Reports.yearly(vm.data, reportMonth.year, today), reportMonth.year.toString())) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(tr("كشف سنة ${reportMonth.year} كاملة", "Full year ${reportMonth.year}")) }
+            Hint(tr(
+                "ملف PDF يُفتح على أي هاتف أو كمبيوتر بدون الحاجة للتطبيق — مناسب لإرساله للمدير.",
+                "A PDF that opens on any phone or computer without this app — ready for your manager.",
+            ))
+        }
+
+        SectionCard(tr("النسخ الاحتياطي (مهم عند تغيير الهاتف)", "Backup (important when changing phones)")) {
             Button(onClick = { exportLauncher.launch(Sharing.backupFileName()) }, modifier = Modifier.fillMaxWidth()) {
-                Text("حفظ نسخة احتياطية في ملف")
+                Text(tr("حفظ نسخة احتياطية في ملف", "Save a backup file"))
             }
-            Hint("يحفظ ملفاً صغيراً في الهاتف أو Google Drive. لا يحتاج إنترنت إذا حفظته على الهاتف.")
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             OutlinedButton(onClick = { report(Sharing.shareBackup(ctx, vm.data)) }, modifier = Modifier.fillMaxWidth()) {
-                Text("إرسال النسخة الاحتياطية (واتساب / إيميل)")
+                Text(tr("إرسال النسخة الاحتياطية (واتساب / إيميل)", "Send backup (WhatsApp / email)"))
             }
-            Hint("أرسلها لنفسك لتحتفظ بها خارج الهاتف.")
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             OutlinedButton(
                 onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")) },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("استعادة من نسخة احتياطية") }
-            Hint("اختر ملف msf-leave-backup-….json. ستظهر لك رسالة تأكيد قبل الاستبدال.")
+            ) { Text(tr("استعادة من نسخة احتياطية", "Restore from backup")) }
+            Hint(tr("ستظهر رسالة تأكيد قبل استبدال بياناتك.", "You will be asked to confirm before your data is replaced."))
         }
 
-        SectionCard("المشاركة") {
+        SectionCard(tr("مشاركة التطبيق", "Share the app")) {
             Button(onClick = { report(Sharing.shareApp(ctx)) }, modifier = Modifier.fillMaxWidth()) {
-                Text("مشاركة ملف التطبيق (APK)")
+                Text(tr("إرسال ملف التطبيق (APK)", "Send the app file (APK)"))
             }
-            Hint("يرسل التطبيق نفسه لزميلك عبر واتساب أو البلوتوث أو Nearby Share — يعمل بدون إنترنت.")
+            Hint(tr("عبر واتساب أو البلوتوث أو Nearby Share — يعمل بدون إنترنت.", "Via WhatsApp, Bluetooth or Nearby Share — works offline."))
             if (BuildConfig.RELEASE_URL.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 OutlinedButton(onClick = { report(Sharing.shareLink(ctx)) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("مشاركة رابط التحميل")
+                    Text(tr("مشاركة رابط التحميل", "Share download link"))
                 }
-                Hint("رابط دائم لآخر إصدار.")
             }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { report(Sharing.shareSummary(ctx, vm.data)) }, modifier = Modifier.fillMaxWidth()) {
-                Text("مشاركة ملخص رصيدي كنص")
-            }
-            Hint("مفيد لإرساله للموارد البشرية أو للمدير المباشر.")
         }
 
-        SectionCard("منطقة الخطر") {
+        SectionCard(tr("منطقة الخطر", "Danger zone")) {
             OutlinedButton(onClick = { confirmReset = 1 }, modifier = Modifier.fillMaxWidth()) {
-                Text("حذف كل البيانات", color = MaterialTheme.colorScheme.error)
+                Text(tr("حذف كل البيانات", "Delete all data"), color = MaterialTheme.colorScheme.error)
             }
-            Hint("يحذف الرصيد وكل الإجازات من هذا الهاتف. احفظ نسخة احتياطية أولاً.")
+            Hint(tr("يحذف الرصيد وكل الإجازات من هذا الهاتف. احفظ نسخة احتياطية أولاً.", "Removes the balance and all leaves from this phone. Back up first."))
         }
 
         Text(
-            "MSF Leave Tracker • الإصدار ${BuildConfig.VERSION_NAME}\nيعمل بالكامل بدون إنترنت. بياناتك محفوظة على هاتفك فقط.",
+            tr("متتبع الإجازات • الإصدار ", "Leave Tracker • version ") + BuildConfig.VERSION_NAME + "\n" +
+                tr("يعمل بالكامل بدون إنترنت. بياناتك محفوظة على هاتفك فقط.", "Works fully offline. Your data stays on your phone."),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -277,35 +329,33 @@ fun SettingsScreen(vm: AppViewModel) {
     if (imp != null) {
         AlertDialog(
             onDismissRequest = { pendingImport = null },
-            title = { Text("استعادة النسخة الاحتياطية؟") },
+            title = { Text(tr("استعادة النسخة الاحتياطية؟", "Restore this backup?")) },
             text = {
                 Text(
-                    buildString {
-                        append("سيتم استبدال بياناتك الحالية (${vm.data.entries.size} إجازة) ")
-                        append("ببيانات النسخة (${imp.data.entries.size} إجازة).")
-                        if (imp.data.settings == null) append("\n\nتنبيه: النسخة لا تحتوي على إعدادات الرصيد، ستحتاج لإدخالها.")
-                        if (imp.skipped > 0) append("\n\nتنبيه: تم تجاهل ${imp.skipped} سجل تالف في الملف.")
-                    },
+                    tr(
+                        "سيتم استبدال بياناتك الحالية (${vm.data.entries.size} إجازة) ببيانات النسخة (${imp.data.entries.size} إجازة).",
+                        "Your current data (${vm.data.entries.size} leaves) will be replaced by the backup (${imp.data.entries.size} leaves).",
+                    ) + (if (imp.skipped > 0) tr("\n\nتم تجاهل ${imp.skipped} سجل تالف.", "\n\n${imp.skipped} damaged records skipped.") else ""),
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
                     pendingImport = null
-                    if (vm.replaceAll(imp.data)) vm.toast("تمت الاستعادة بنجاح")
-                }) { Text("استبدال") }
+                    if (vm.replaceAll(imp.data)) vm.toast(tr("تمت الاستعادة ✔", "Restored ✔"))
+                }) { Text(tr("استبدال", "Replace")) }
             },
-            dismissButton = { TextButton(onClick = { pendingImport = null }) { Text("إلغاء") } },
+            dismissButton = { TextButton(onClick = { pendingImport = null }) { Text(tr("إلغاء", "Cancel")) } },
         )
     }
 
     if (confirmReset > 0) {
         AlertDialog(
             onDismissRequest = { confirmReset = 0 },
-            title = { Text(if (confirmReset == 1) "حذف كل البيانات؟" else "تأكيد نهائي") },
+            title = { Text(if (confirmReset == 1) tr("حذف كل البيانات؟", "Delete all data?") else tr("تأكيد نهائي", "Final confirmation")) },
             text = {
                 Text(
-                    if (confirmReset == 1) "سيتم حذف الرصيد و${vm.data.entries.size} إجازة من هذا الهاتف."
-                    else "لا يمكن التراجع عن هذه الخطوة. هل أنت متأكد تماماً؟",
+                    if (confirmReset == 1) tr("سيتم حذف الرصيد و${vm.data.entries.size} إجازة.", "Balance and ${vm.data.entries.size} leaves will be deleted.")
+                    else tr("لا يمكن التراجع. هل أنت متأكد تماماً؟", "This can't be undone. Are you sure?"),
                 )
             },
             confirmButton = {
@@ -314,11 +364,11 @@ fun SettingsScreen(vm: AppViewModel) {
                         confirmReset = 2
                     } else {
                         confirmReset = 0
-                        if (vm.resetAll()) vm.toast("تم حذف كل البيانات")
+                        if (vm.resetAll()) vm.toast(tr("تم حذف كل البيانات", "All data deleted"))
                     }
-                }) { Text(if (confirmReset == 1) "متابعة" else "حذف نهائي", color = MaterialTheme.colorScheme.error) }
+                }) { Text(if (confirmReset == 1) tr("متابعة", "Continue") else tr("حذف نهائي", "Delete"), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { confirmReset = 0 }) { Text("إلغاء") } },
+            dismissButton = { TextButton(onClick = { confirmReset = 0 }) { Text(tr("إلغاء", "Cancel")) } },
         )
     }
 }

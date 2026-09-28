@@ -1,6 +1,7 @@
 package com.msf.jordan.leavetracker.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,13 +17,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -36,27 +37,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.clickable
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.msf.jordan.leavetracker.logic.DurationKind
+import com.msf.jordan.leavetracker.logic.Issue
 import com.msf.jordan.leavetracker.logic.IssueLevel
 import com.msf.jordan.leavetracker.logic.LeaveDraft
 import com.msf.jordan.leavetracker.logic.LeaveType
 import com.msf.jordan.leavetracker.logic.MAX_NOTE_LENGTH
+import com.msf.jordan.leavetracker.logic.ParsedForm
 import com.msf.jordan.leavetracker.logic.Rules
+import com.msf.jordan.leavetracker.logic.tr
 import java.time.LocalDate
 
 private enum class PickTarget { START, END }
 
+/**
+ * Add / edit a leave. [scan] pre-fills the fields from a photographed request form.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LeaveEditorScreen(
     vm: AppViewModel,
     entryId: String?,
+    scan: ParsedForm?,
     snackbar: SnackbarHostState,
     onClose: (saved: Boolean) -> Unit,
 ) {
@@ -65,66 +70,51 @@ fun LeaveEditorScreen(
     val settings = vm.data.settings
     val weekend = settings?.weekend ?: Rules.DEFAULT_WEEKEND
 
-    // Initial values (used to detect unsaved changes)
-    val initType = existing?.type?.key ?: LeaveType.HOLIDAY.key
-    val initDuration = (existing?.let { Rules.inferDuration(it) } ?: DurationKind.ONE).name
-    val initStart = (existing?.start ?: today).toEpochDay()
-    val initEnd = (existing?.end ?: today).toEpochDay()
-    val initManual = existing != null && Rules.inferDuration(existing) == DurationKind.MULTI &&
-        existing.daysX100 != Rules.workingDays(existing.start, existing.end, weekend) * 100
-    val initManualText = if (initManual && existing != null) Rules.fmtDays(existing.daysX100) else ""
-    val initNote = existing?.note.orEmpty()
+    // Initial values (to detect unsaved changes)
+    val init = remember(entryId, scan) {
+        val t = existing?.type ?: scan?.type ?: LeaveType.HOLIDAY
+        val s = existing?.start ?: scan?.start ?: today
+        val e = existing?.end ?: scan?.end?.takeIf { !it.isBefore(s) } ?: s
+        val d = existing?.daysX100 ?: scan?.daysX100 ?: Rules.suggestedDaysX100(s, e, weekend)
+        listOf(t.key, s.toEpochDay().toString(), e.toEpochDay().toString(), Rules.fmtDays(d), existing?.note.orEmpty())
+    }
 
-    var typeKey by rememberSaveable { mutableStateOf(initType) }
-    var durationName by rememberSaveable { mutableStateOf(initDuration) }
-    var startDay by rememberSaveable { mutableStateOf(initStart) }
-    var endDay by rememberSaveable { mutableStateOf(initEnd) }
-    var manualOn by rememberSaveable { mutableStateOf(initManual) }
-    var manualText by rememberSaveable { mutableStateOf(initManualText) }
-    var note by rememberSaveable { mutableStateOf(initNote) }
+    var typeKey by rememberSaveable { mutableStateOf(init[0]) }
+    var startDay by rememberSaveable { mutableStateOf(init[1].toLong()) }
+    var endDay by rememberSaveable { mutableStateOf(init[2].toLong()) }
+    var daysInput by rememberSaveable { mutableStateOf(init[3]) }
+    /** false = the days field follows the dates automatically. */
+    var daysTyped by rememberSaveable { mutableStateOf(existing != null || scan?.daysX100 != null) }
+    var note by rememberSaveable { mutableStateOf(init[4]) }
 
     var picking by remember { mutableStateOf<PickTarget?>(null) }
     var confirmWarnings by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
-    var showErrorsHint by remember { mutableStateOf(false) }
+    var triedSave by remember { mutableStateOf(false) }
 
     val type = LeaveType.fromKey(typeKey) ?: LeaveType.HOLIDAY
-    val duration = runCatching { DurationKind.valueOf(durationName) }.getOrDefault(DurationKind.ONE)
     val start = LocalDate.ofEpochDay(startDay)
     val end = LocalDate.ofEpochDay(endDay)
+    val days = Rules.parseDaysX100(daysInput)
+    val suggested = Rules.suggestedDaysX100(start, end, weekend)
 
-    val baseDraft = LeaveDraft(
-        editingId = entryId,
-        type = type,
-        duration = duration,
-        start = start,
-        end = end,
-        manualDaysX100 = null,
-        note = note,
-    )
-    val spansAndLocked = Rules.spansPayslips(baseDraft) && type.affectsBalance
-    val manualActive = duration == DurationKind.MULTI && manualOn && !spansAndLocked
-    val manualParsed = if (manualActive) Rules.parseDaysX100(manualText) else null
-    val draft = baseDraft.copy(manualDaysX100 = manualParsed)
-    val result = Rules.validate(draft, settings, vm.data.entries, today)
-    val issues = buildList {
-        if (manualActive && manualParsed == null) {
-            add(com.msf.jordan.leavetracker.logic.Issue(IssueLevel.ERROR, "اكتب عدد الأيام رقماً صحيحاً مثل 3 أو 2.5."))
-        }
-        addAll(result.issues)
+    fun autoDays(s: LocalDate, e: LocalDate) {
+        if (!daysTyped) daysInput = Rules.fmtDays(Rules.suggestedDaysX100(s, e, weekend))
     }
-    val hasErrors = issues.any { it.level == IssueLevel.ERROR }
 
-    val dirty = typeKey != initType || durationName != initDuration || startDay != initStart ||
-        (duration == DurationKind.MULTI && endDay != initEnd) || manualOn != initManual ||
-        manualText != initManualText || note != initNote
+    val draft = LeaveDraft(entryId, type, start, end, days, note)
+    val result = Rules.validate(draft, settings, vm.data.entries, today)
+    val hasErrors = result.hasErrors
+
+    val dirty = typeKey != init[0] || startDay != init[1].toLong() || endDay != init[2].toLong() ||
+        daysInput != init[3] || note != init[4] || (scan != null && existing == null)
 
     fun tryClose() {
         if (dirty) confirmDiscard = true else onClose(false)
     }
 
     fun doSave() {
-        if (vm.saveLeave(entryId, type, result.parts, note)) onClose(true)
+        if (days != null && vm.saveLeave(entryId, type, start, end, days, note)) onClose(true)
     }
 
     BackHandler { tryClose() }
@@ -133,10 +123,8 @@ fun LeaveEditorScreen(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
-                title = { Text(if (existing == null) "إضافة إجازة" else "تعديل إجازة") },
-                navigationIcon = {
-                    IconButton(onClick = { tryClose() }) { Icon(Icons.Filled.Close, "إغلاق") }
-                },
+                title = { Text(if (existing == null) tr("إضافة إجازة", "Add leave") else tr("تعديل إجازة", "Edit leave")) },
+                navigationIcon = { IconButton(onClick = { tryClose() }) { Icon(Icons.Filled.Close, tr("إغلاق", "Close")) } },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary,
@@ -153,93 +141,97 @@ fun LeaveEditorScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // 1. Type
-            SectionCard("1. نوع الإجازة") {
+            if (scan != null && existing == null) {
+                val missing = buildList {
+                    if (scan.type == null) add(tr("النوع", "type"))
+                    if (scan.start == null) add(tr("التاريخ", "date"))
+                    if (scan.daysX100 == null) add(tr("عدد الأيام", "days"))
+                }
+                IssueBox(Issue(
+                    if (missing.isEmpty()) IssueLevel.INFO else IssueLevel.WARNING,
+                    if (missing.isEmpty()) tr(
+                        "تمت قراءة النموذج. راجع كل الحقول قبل الحفظ.",
+                        "Form read. Please review every field before saving.",
+                    ) else tr(
+                        "لم أتمكن من قراءة: ${missing.joinToString("، ")}. أدخلها يدوياً وراجع الباقي.",
+                        "Couldn't read: ${missing.joinToString(", ")}. Enter it manually and review the rest.",
+                    ),
+                ))
+            }
+
+            SectionCard(tr("1. نوع الإجازة", "1. Leave type")) {
                 TypeSelector(type) { typeKey = it.key }
                 Hint(type.hint)
             }
 
-            // 2. Duration
-            SectionCard("2. المدة") {
-                DurationOption("نصف يوم (0.5)", "لإجازة صباحية أو مسائية فقط.", duration == DurationKind.HALF) {
-                    durationName = DurationKind.HALF.name
-                }
-                DurationOption("يوم واحد (1)", "يوم عمل كامل.", duration == DurationKind.ONE) {
-                    durationName = DurationKind.ONE.name
-                }
-                DurationOption("عدة أيام", "اختر تاريخ البداية والنهاية، ويحسب التطبيق أيام العمل تلقائياً.", duration == DurationKind.MULTI) {
-                    durationName = DurationKind.MULTI.name
-                    if (endDay < startDay) endDay = startDay
-                }
+            SectionCard(tr("2. التاريخ", "2. Dates")) {
+                DateField(tr("من (أول يوم إجازة)", "From (first day off)"), start) { picking = PickTarget.START }
+                Spacer(Modifier.height(10.dp))
+                DateField(tr("إلى (آخر يوم إجازة)", "To (last day off)"), end) { picking = PickTarget.END }
+                Hint(tr(
+                    "لإجازة يوم واحد أو نصف يوم اجعل «من» و«إلى» نفس اليوم. «إلى» هو آخر يوم إجازة وليس يوم العودة.",
+                    "For one day or half a day keep «From» and «To» the same. «To» is the last day off, not the return day.",
+                ))
             }
 
-            // 3. Dates
-            SectionCard("3. التاريخ") {
-                DateField(if (duration == DurationKind.MULTI) "تاريخ البداية" else "التاريخ", start) { picking = PickTarget.START }
-                if (duration == DurationKind.MULTI) {
-                    Spacer(Modifier.height(10.dp))
-                    DateField("تاريخ النهاية (آخر يوم إجازة)", end) { picking = PickTarget.END }
-                    Hint("اضغط على الحقل لفتح التقويم. تاريخ النهاية هو آخر يوم تكون فيه في إجازة وليس يوم العودة.")
-                    if (!end.isBefore(start)) {
-                        val wd = Rules.workingDays(start, end, weekend)
-                        val cal = Rules.calendarDays(start, end)
-                        Spacer(Modifier.height(8.dp))
-                        Text("أيام العمل المحسوبة: $wd يوم (من أصل $cal يوم تقويمي)", fontWeight = FontWeight.Bold)
-                        Hint("لا تُحسب أيام عطلة نهاية الأسبوع.")
+            SectionCard(tr("3. عدد الأيام (كما في نموذج الطلب)", "3. Number of days (as on the form)")) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    QuickDays(tr("نصف يوم", "Half day"), "0.5", daysInput) {
+                        daysInput = it
+                        daysTyped = true
+                        if (endDay != startDay) endDay = startDay
                     }
-
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = !spansAndLocked) { manualOn = !manualOn },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(checked = manualOn && !spansAndLocked, onCheckedChange = { manualOn = it }, enabled = !spansAndLocked)
-                        Text("تعديل عدد الأيام يدوياً")
+                    QuickDays(tr("يوم", "1 day"), "1", daysInput) {
+                        daysInput = it
+                        daysTyped = true
+                        if (endDay != startDay) endDay = startDay
                     }
-                    if (spansAndLocked) {
-                        Hint("غير متاح هنا لأن الإجازة السنوية تمتد عبر يوم 15 وسيتم تقسيمها تلقائياً.")
-                    } else if (manualOn) {
-                        OutlinedTextField(
-                            value = manualText,
-                            onValueChange = { manualText = it.take(6) },
-                            label = { Text("عدد الأيام") },
-                            placeholder = { Text("مثال: 2.5") },
-                            singleLine = true,
-                            isError = manualParsed == null,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Hint("استخدمه فقط إذا كانت في الفترة عطلة رسمية أو نصف يوم. المسموح: مضاعفات 0.5.")
-                    } else {
-                        Hint("فعّله إذا صادفت الفترة عطلة رسمية (مثل عيد) لا يجب خصمها.")
+                    if (start != end && suggested > 0) {
+                        QuickDays(tr("حسب التواريخ", "By dates") + " (${Rules.fmtDays(suggested)})", Rules.fmtDays(suggested), daysInput) {
+                            daysInput = it
+                            daysTyped = false
+                        }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = daysInput,
+                    onValueChange = {
+                        daysInput = it.take(6)
+                        daysTyped = true
+                    },
+                    label = { Text(tr("عدد الأيام", "Days")) },
+                    placeholder = { Text(tr("مثال: 0.5 أو 1 أو 2.5", "e.g. 0.5, 1 or 2.5")) },
+                    singleLine = true,
+                    isError = days == null || (days % 50 != 0),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Hint(tr(
+                    "اكتب نفس العدد المكتوب في نموذج الطلب: 0.5 أو 1 أو أكثر. أيام العمل في الفترة = ${Rules.fmtDays(suggested)} (بدون الجمعة والسبت).",
+                    "Use the same number written on the request form: 0.5, 1 or more. Working days in the period = ${Rules.fmtDays(suggested)} (weekends excluded).",
+                ))
             }
 
-            // 4. Note
-            SectionCard("4. ملاحظة (اختياري)") {
+            SectionCard(tr("4. ملاحظة (اختياري)", "4. Note (optional)")) {
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it.take(MAX_NOTE_LENGTH) },
-                    label = { Text("ملاحظة") },
-                    placeholder = { Text("مثال: سفر عائلي / رقم الطلب") },
+                    label = { Text(tr("ملاحظة", "Note")) },
+                    placeholder = { Text(tr("مثال: سفر عائلي / رقم الطلب", "e.g. family trip / request no.")) },
                     modifier = Modifier.fillMaxWidth(),
                     maxLines = 3,
                     supportingText = { Text("${note.length}/$MAX_NOTE_LENGTH") },
                 )
-                Hint("تظهر في السجل فقط لمساعدتك على التذكّر.")
+                Hint(tr("تظهر في السجل والبحث فقط.", "Shown in history and search only."))
             }
 
-            // Checks
-            if (issues.isNotEmpty()) {
-                SectionCard("المراجعة قبل الحفظ") { IssuesList(issues) }
+            if (result.issues.isNotEmpty()) {
+                SectionCard(tr("المراجعة قبل الحفظ", "Check before saving")) { IssuesList(result.issues) }
             }
-
-            if (hasErrors && showErrorsHint) {
+            if (hasErrors && triedSave) {
                 Text(
-                    "لا يمكن الحفظ قبل تصحيح الأخطاء المشار إليها باللون الأحمر.",
+                    tr("لا يمكن الحفظ قبل تصحيح الأخطاء باللون الأحمر.", "Fix the red errors before saving."),
                     color = MaterialTheme.colorScheme.error,
                     fontWeight = FontWeight.Bold,
                 )
@@ -247,16 +239,19 @@ fun LeaveEditorScreen(
 
             Button(
                 onClick = {
+                    triedSave = true
                     when {
-                        hasErrors -> showErrorsHint = true
+                        hasErrors -> Unit
                         result.warnings.isNotEmpty() -> confirmWarnings = true
                         else -> doSave()
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
-                val total = result.parts.sumOf { it.daysX100 }
-                Text(if (hasErrors) "حفظ (يوجد أخطاء)" else "حفظ • ${Rules.fmtDays(total)} يوم")
+                Text(
+                    if (hasErrors || days == null) tr("حفظ (يوجد أخطاء)", "Save (has errors)")
+                    else tr("حفظ • ", "Save • ") + daysText(days),
+                )
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -264,13 +259,14 @@ fun LeaveEditorScreen(
 
     when (picking) {
         PickTarget.START -> DatePickDialog(start, onDismiss = { picking = null }) { d ->
-            val shift = d.toEpochDay() - startDay
+            val length = endDay - startDay
             startDay = d.toEpochDay()
-            // keep the same length when moving the start date
-            if (duration == DurationKind.MULTI) endDay = (endDay + shift).coerceAtLeast(startDay)
+            endDay = startDay + length.coerceAtLeast(0)
+            autoDays(LocalDate.ofEpochDay(startDay), LocalDate.ofEpochDay(endDay))
         }
         PickTarget.END -> DatePickDialog(if (end.isBefore(start)) start else end, onDismiss = { picking = null }) { d ->
             endDay = d.toEpochDay()
+            autoDays(start, d)
         }
         null -> Unit
     }
@@ -278,53 +274,46 @@ fun LeaveEditorScreen(
     if (confirmWarnings) {
         AlertDialog(
             onDismissRequest = { confirmWarnings = false },
-            title = { Text("تنبيه قبل الحفظ") },
+            title = { Text(tr("تنبيه قبل الحفظ", "Please confirm")) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     result.warnings.forEach { IssueBox(it) }
                     Spacer(Modifier.height(6.dp))
-                    Text("هل تريد الحفظ على أي حال؟")
+                    Text(tr("هل تريد الحفظ على أي حال؟", "Save anyway?"))
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     confirmWarnings = false
                     doSave()
-                }) { Text("حفظ على أي حال") }
+                }) { Text(tr("حفظ على أي حال", "Save anyway")) }
             },
-            dismissButton = { TextButton(onClick = { confirmWarnings = false }) { Text("رجوع للتعديل") } },
+            dismissButton = { TextButton(onClick = { confirmWarnings = false }) { Text(tr("رجوع للتعديل", "Back")) } },
         )
     }
 
     if (confirmDiscard) {
         AlertDialog(
             onDismissRequest = { confirmDiscard = false },
-            title = { Text("تجاهل التغييرات؟") },
-            text = { Text("لم تحفظ التغييرات بعد. إذا خرجت الآن ستُفقد.") },
+            title = { Text(tr("تجاهل التغييرات؟", "Discard changes?")) },
+            text = { Text(tr("لم تحفظ بعد. إذا خرجت الآن ستُفقد التغييرات.", "Not saved yet. Leaving now will lose your changes.")) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDiscard = false
                     onClose(false)
-                }) { Text("خروج بدون حفظ", color = MaterialTheme.colorScheme.error) }
+                }) { Text(tr("خروج بدون حفظ", "Discard"), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("متابعة التعديل") } },
+            dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text(tr("متابعة", "Keep editing")) } },
         )
     }
 }
 
 @Composable
-private fun DurationOption(title: String, hint: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = onClick)
-        Column {
-            Text(title, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+private fun QuickDays(label: String, value: String, current: String, onPick: (String) -> Unit) {
+    val selected = Rules.parseDaysX100(current) == Rules.parseDaysX100(value)
+    if (selected) {
+        FilledTonalButton(onClick = { onPick(value) }) { Text(label) }
+    } else {
+        OutlinedButton(onClick = { onPick(value) }) { Text(label) }
     }
 }

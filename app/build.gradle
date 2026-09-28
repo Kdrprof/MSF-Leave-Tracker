@@ -20,6 +20,8 @@ android {
         versionCode ciVersionCode
         versionName ciVersionName
         buildConfigField 'String', 'RELEASE_URL', "\"${releaseUrl}\""
+        // Real phones only (keeps the APK smaller; emulators use x86)
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
     }
 
     // Signing key comes from GitHub Secrets (never stored in the repo).
@@ -78,6 +80,10 @@ dependencies {
     implementation 'androidx.activity:activity-compose:1.9.2'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.6'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.6'
+    implementation 'androidx.exifinterface:exifinterface:1.3.7'
+    // On-device text recognition (bundled model: works without internet)
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
 
     testImplementation 'junit:junit:4.13.2'
 }

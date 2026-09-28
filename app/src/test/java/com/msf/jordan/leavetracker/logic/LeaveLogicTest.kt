@@ -11,127 +11,199 @@ import java.time.YearMonth
 class LeaveLogicTest {
 
     private val weekend = Rules.DEFAULT_WEEKEND
-    private val today = LocalDate.of(2026, 9, 28)
+    private val today = LocalDate.of(2026, 9, 28) // Monday
     private val settings = AppSettings("", 1000, YearMonth.of(2026, 8), weekend)
 
     private fun entry(id: String, type: LeaveType, s: String, e: String, x100: Int) =
         LeaveEntry(id, type, LocalDate.parse(s), LocalDate.parse(e), x100, "", 0L)
 
-    private fun draft(type: LeaveType, dur: DurationKind, s: String, e: String = s, manual: Int? = null, editing: String? = null) =
-        LeaveDraft(editing, type, dur, LocalDate.parse(s), LocalDate.parse(e), manual, "")
+    private fun draft(type: LeaveType, s: String, e: String = s, days: Int? = 100, editing: String? = null) =
+        LeaveDraft(editing, type, LocalDate.parse(s), LocalDate.parse(e), days, "")
 
-    @Test fun cutoffRule() {
+    @Test fun cutoffRuleByFirstDayNoSplit() {
         assertEquals(YearMonth.of(2026, 9), Rules.payslipMonth(LocalDate.of(2026, 9, 1)))
         assertEquals(YearMonth.of(2026, 9), Rules.payslipMonth(LocalDate.of(2026, 9, 15)))
         assertEquals(YearMonth.of(2026, 10), Rules.payslipMonth(LocalDate.of(2026, 9, 16)))
         assertEquals(YearMonth.of(2027, 1), Rules.payslipMonth(LocalDate.of(2026, 12, 31)))
+        // 13 → 17 Sep: whole leave goes to the September payslip, not split
+        val data = AppData(settings, listOf(entry("a", LeaveType.HOLIDAY, "2026-09-13", "2026-09-17", 500)))
+        val s = Rules.summarize(data, today)
+        assertEquals(500, s.rows.first { it.month == YearMonth.of(2026, 9) }.accountedX100)
+        assertEquals(0, s.nextSlipDeductionX100)
     }
 
-    @Test fun workingDaysSkipWeekend() {
-        // 2026-09-24 Thu .. 2026-09-28 Mon → Thu, Sun, Mon = 3 (Fri/Sat skipped)
+    @Test fun ledgerMatchesRealPayslip() {
+        // Payslip: previous 9.55, accounted 2.50, acquired 2.08, remaining 9.13
+        val st = AppSettings("", 955, YearMonth.of(2026, 7), weekend)
+        val data = AppData(st, listOf(
+            entry("a", LeaveType.HOLIDAY, "2026-07-20", "2026-07-21", 200), // → Aug slip
+            entry("b", LeaveType.HOLIDAY, "2026-08-03", "2026-08-03", 50),  // → Aug slip
+            entry("c", LeaveType.SICK, "2026-08-05", "2026-08-05", 100),    // never on slip
+        ))
+        val row = Rules.summarize(data, LocalDate.of(2026, 8, 20)).rows.first()
+        assertEquals(YearMonth.of(2026, 8), row.month)
+        assertEquals("9.55", Rules.fmtSlip(row.previousX100))
+        assertEquals("2.50", Rules.fmtSlip(row.accountedX100))
+        assertEquals("2.08", Rules.fmtSlip(row.acquiredX100))
+        assertEquals("9.13", Rules.fmtSlip(row.remainingX100))
+    }
+
+    @Test fun workingDays() {
         assertEquals(3, Rules.workingDays(LocalDate.of(2026, 9, 24), LocalDate.of(2026, 9, 28), weekend))
         assertEquals(0, Rules.workingDays(LocalDate.of(2026, 9, 25), LocalDate.of(2026, 9, 26), weekend))
-        assertEquals(0, Rules.workingDays(LocalDate.of(2026, 9, 28), LocalDate.of(2026, 9, 27), weekend))
+        assertEquals(100, Rules.suggestedDaysX100(LocalDate.of(2026, 9, 25), LocalDate.of(2026, 9, 25), weekend))
     }
 
-    @Test fun splitAcross15th() {
-        // 13 Sep (Sun) .. 17 Sep (Thu) 2026
-        val parts = Rules.splitByPayslip(LocalDate.of(2026, 9, 13), LocalDate.of(2026, 9, 17), weekend)
-        assertEquals(2, parts.size)
-        assertEquals(300, parts[0].daysX100) // 13,14,15
-        assertEquals(200, parts[1].daysX100) // 16,17
-        assertEquals(YearMonth.of(2026, 10), Rules.payslipMonth(parts[1].start))
-    }
-
-    @Test fun accrualAndDeduction() {
+    @Test fun balanceNoFloatingDrift() {
         val data = AppData(settings, listOf(
-            entry("a", LeaveType.HOLIDAY, "2026-09-10", "2026-09-10", 100), // Sep slip
-            entry("b", LeaveType.HOLIDAY, "2026-09-20", "2026-09-21", 200), // Oct slip
-            entry("c", LeaveType.SICK, "2026-09-01", "2026-09-01", 100),     // ignored
-            entry("d", LeaveType.HOLIDAY, "2026-08-05", "2026-08-05", 100),  // Aug slip = opening, ignored
+            entry("a", LeaveType.HOLIDAY, "2026-09-10", "2026-09-10", 100),
+            entry("b", LeaveType.HOLIDAY, "2026-09-20", "2026-09-21", 200),
+            entry("d", LeaveType.HOLIDAY, "2026-08-05", "2026-08-05", 100), // inside opening balance
         ))
         val s = Rules.summarize(data, today)
-        assertEquals(1000 + 208 - 100, s.currentSlipX100) // 11.08
-        assertEquals(200, s.pendingFutureX100)
+        assertEquals(1000 - 100 + 208, s.currentSlipX100)
         assertEquals(200, s.nextSlipDeductionX100)
         assertEquals(908, s.availableX100)
-        assertEquals(2, s.rows.size)
-        assertTrue(s.rows[1].projected)
-        // no floating drift over 12 months
         val y = Rules.summarize(AppData(settings.copy(openingBalanceX100 = 0, openingMonth = YearMonth.of(2025, 9)), emptyList()), today)
-        assertEquals(12 * 208, y.currentSlipX100)
         assertEquals("24.96", Rules.fmtDays(y.currentSlipX100))
+    }
+
+    @Test fun totalsForAllTypes() {
+        val list = listOf(
+            entry("a", LeaveType.HOLIDAY, "2026-09-10", "2026-09-10", 50),
+            entry("b", LeaveType.SICK, "2026-09-14", "2026-09-15", 200),
+            entry("c", LeaveType.SICK, "2026-08-03", "2026-08-03", 100),
+        )
+        val t = Rules.totalsByType(list)
+        assertEquals(300, t[LeaveType.SICK])
+        assertEquals(50, t[LeaveType.HOLIDAY])
+        val months = Rules.totalsByMonth(list)
+        assertEquals(YearMonth.of(2026, 9), months.first().first)
+        assertEquals(350, Rules.summarize(AppData(settings, list), today).totalThisYearX100)
     }
 
     @Test fun parsing() {
         assertEquals(1250, Rules.parseDaysX100("12.5"))
-        assertEquals(1208, Rules.parseDaysX100("12,08"))
+        assertEquals(913, Rules.parseDaysX100("9,13"))
         assertEquals(1250, Rules.parseDaysX100("١٢٫٥"))
-        assertEquals(-300, Rules.parseDaysX100("-3"))
+        assertEquals(50, Rules.parseDaysX100("½"))
+        assertEquals(50, Rules.parseDaysX100(".5"))
         assertEquals(700, Rules.parseDaysX100(" 7. "))
         assertNull(Rules.parseDaysX100("12.555"))
         assertNull(Rules.parseDaysX100("abc"))
         assertNull(Rules.parseDaysX100(""))
-        assertNull(Rules.parseDaysX100("."))
-        assertEquals("0.5", Rules.fmtDays(50))
-        assertEquals("2.08", Rules.fmtDays(208))
+        assertEquals("2.50", Rules.fmtSlip(250))
         assertEquals("-1.5", Rules.fmtDays(-150))
     }
 
     @Test fun validationErrors() {
-        val v1 = Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.MULTI, "2026-10-10", "2026-10-05"), settings, emptyList(), today)
-        assertTrue(v1.hasErrors)
-        val v2 = Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.MULTI, "2026-10-02", "2026-10-03"), settings, emptyList(), today)
-        assertTrue(v2.hasErrors) // Fri+Sat only
-        val v3 = Rules.validate(draft(LeaveType.SICK, DurationKind.MULTI, "2026-10-04", "2026-10-06", manual = 130), settings, emptyList(), today)
-        assertTrue(v3.hasErrors) // not multiple of 0.5
-        val v4 = Rules.validate(draft(LeaveType.SICK, DurationKind.MULTI, "2026-10-04", "2026-10-05", manual = 300), settings, emptyList(), today)
-        assertTrue(v4.hasErrors) // more than calendar days
-        val v5 = Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.MULTI, "2026-10-13", "2026-10-18", manual = 300), settings, emptyList(), today)
-        assertTrue(v5.hasErrors) // manual across 15th
-        val v6 = Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.ONE, "2026-10-04"), null, emptyList(), today)
-        assertTrue(v6.hasErrors) // no settings
+        assertTrue(Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-10", "2026-10-05"), settings, emptyList(), today).hasErrors)
+        assertTrue(Rules.validate(draft(LeaveType.SICK, "2026-10-04", "2026-10-06", days = 130), settings, emptyList(), today).hasErrors)
+        assertTrue(Rules.validate(draft(LeaveType.SICK, "2026-10-04", "2026-10-05", days = 300), settings, emptyList(), today).hasErrors)
+        assertTrue(Rules.validate(draft(LeaveType.SICK, "2026-10-04", days = null), settings, emptyList(), today).hasErrors)
+        assertTrue(Rules.validate(draft(LeaveType.SICK, "2026-10-04", days = 150), settings, emptyList(), today).hasErrors)
+        assertTrue(Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-04"), null, emptyList(), today).hasErrors)
+        // half day and form-entered days are accepted
+        assertFalse(Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-04", days = 50), settings, emptyList(), today).hasErrors)
+        val v = Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-04", "2026-10-08", days = 450), settings, emptyList(), today)
+        assertFalse(v.hasErrors)
+        assertTrue(v.warnings.isNotEmpty()) // differs from 5 working days
     }
 
     @Test fun overlaps() {
         val existing = listOf(entry("x", LeaveType.HOLIDAY, "2026-10-04", "2026-10-06", 300), entry("h", LeaveType.SICK, "2026-10-11", "2026-10-11", 50))
-        assertTrue(Rules.validate(draft(LeaveType.SICK, DurationKind.ONE, "2026-10-05"), settings, existing, today).hasErrors)
-        // editing same entry is not a conflict
-        assertFalse(Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.MULTI, "2026-10-04", "2026-10-07", editing = "x"), settings, existing, today).hasErrors)
-        // two half days on same date allowed
-        assertFalse(Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.HALF, "2026-10-11"), settings, existing, today).hasErrors)
-        // full day over a half day is a conflict
-        assertTrue(Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.ONE, "2026-10-11"), settings, existing, today).hasErrors)
+        assertTrue(Rules.validate(draft(LeaveType.SICK, "2026-10-05"), settings, existing, today).hasErrors)
+        assertFalse(Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-04", "2026-10-07", days = 400, editing = "x"), settings, existing, today).hasErrors)
+        assertFalse(Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-11", days = 50), settings, existing, today).hasErrors)
+        assertTrue(Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-11", days = 100), settings, existing, today).hasErrors)
     }
 
-    @Test fun warningsAndSplitPlan() {
-        val weekendDay = Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.ONE, "2026-10-02"), settings, emptyList(), today)
-        assertFalse(weekendDay.hasErrors)
-        assertTrue(weekendDay.warnings.isNotEmpty())
-        val split = Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.MULTI, "2026-10-13", "2026-10-18"), settings, emptyList(), today)
-        assertFalse(split.hasErrors)
-        assertEquals(2, split.parts.size)
-        assertEquals(400, split.parts.sumOf { it.daysX100 }) // 13,14,15 | 18 ; 16,17 = Fri,Sat
-        val negative = Rules.validate(draft(LeaveType.HOLIDAY, DurationKind.MULTI, "2026-10-04", "2026-11-12"), settings, emptyList(), today)
-        assertTrue(negative.warnings.any { it.text.contains("سالب") })
-        val sickSplit = Rules.validate(draft(LeaveType.SICK, DurationKind.MULTI, "2026-10-13", "2026-10-18"), settings, emptyList(), today)
-        assertEquals(1, sickSplit.parts.size) // only Holiday is split
+    @Test fun warnings() {
+        assertTrue(Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-02"), settings, emptyList(), today).warnings.isNotEmpty()) // Friday
+        val neg = Rules.validate(draft(LeaveType.HOLIDAY, "2026-10-04", "2026-11-12", days = 2900), settings, emptyList(), today)
+        assertTrue(neg.warnings.isNotEmpty())
     }
 
     @Test fun settingsValidation() {
         fun v(t: String, m: YearMonth = YearMonth.of(2026, 8)) =
             Rules.validateSettings(Rules.SettingsInput("Khader", t, m, weekend), today)
-        assertFalse(v("12.5").hasErrors)
-        assertTrue(v("").hasErrors)
+        assertFalse(v("9.13").hasErrors)
+        assertTrue(v("").balanceInvalid)
         assertTrue(v("12.555").hasErrors)
         assertTrue(v("500").hasErrors)
         assertTrue(v("10", YearMonth.of(2026, 11)).hasErrors)
-        assertEquals(1250, v("12.5").settings!!.openingBalanceX100)
+        assertEquals(913, v("9.13").settings!!.openingBalanceX100)
     }
 
-    @Test fun normalizeSplitsImportedHoliday() {
-        val list = Rules.normalize(listOf(entry("a", LeaveType.HOLIDAY, "2026-10-13", "2026-10-18", 500)), weekend)
-        assertEquals(2, list.size)
-        assertEquals(setOf("a", "a-1"), list.map { it.id }.toSet())
+    @Test fun calendarMarksSkipWeekendInsideRange() {
+        val marks = Rules.calendarMarks(listOf(entry("a", LeaveType.HOLIDAY, "2026-09-24", "2026-09-28", 300)), 2026, weekend)
+        assertEquals(3, marks.size)
+        assertFalse(marks.containsKey(LocalDate.of(2026, 9, 25)))
+    }
+
+    @Test fun search() {
+        val e = LeaveEntry("a", LeaveType.SICK, LocalDate.of(2026, 8, 5), LocalDate.of(2026, 8, 5), 100, "flu", 0L)
+        assertTrue(Rules.matchesSearch(e, "sick"))
+        assertTrue(Rules.matchesSearch(e, "مرضية"))
+        assertTrue(Rules.matchesSearch(e, "05/08"))
+        assertTrue(Rules.matchesSearch(e, "flu"))
+        assertFalse(Rules.matchesSearch(e, "holiday"))
+    }
+
+    @Test fun i18nMonthsAreJordanian() {
+        Tr.arabic = true
+        assertEquals("أيلول 2026", Tr.monthLabel(YearMonth.of(2026, 9)))
+        Tr.arabic = false
+        assertEquals("September 2026", Tr.monthLabel(YearMonth.of(2026, 9)))
+        Tr.arabic = true
+    }
+
+    // ---------- scanned form ----------
+
+    @Test fun parserReadsTheMsfForm() {
+        val ocr = """
+            LEAVE REQUEST FORM
+            INFORMATION TO BE FILLED IN BY APPLICANT:
+            Name:
+            Khader Adel Al-Hmaimat
+            Position:
+            Specialized physiotherapist
+            Dept:
+            physio department
+            From/ To (Duration):
+            5/8/26
+            Numbers of days requested:
+            I day
+            Employee Number
+            452
+            Type of leave (Holiday, Sick
+            Personal, Training, Unpaid
+            Compassionate):
+            Sick
+            PLEASE DO NOT GIVE REASON FOR SICK LEAVE
+            Date of request: 5/8/26
+        """.trimIndent()
+        val p = FormParser.parse(ocr, today)
+        assertEquals(LeaveType.SICK, p.type)
+        assertEquals(LocalDate.of(2026, 8, 5), p.start)
+        assertEquals(LocalDate.of(2026, 8, 5), p.end)
+        assertEquals(100, p.daysX100)
+    }
+
+    @Test fun parserRangesAndHalfDays() {
+        val p = FormParser.parse("From/To: 20/9/26 - 24/9/26\n3 days\nHoliday", today)
+        assertEquals(LocalDate.of(2026, 9, 20), p.start)
+        assertEquals(LocalDate.of(2026, 9, 24), p.end)
+        assertEquals(300, p.daysX100)
+        assertEquals(LeaveType.HOLIDAY, p.type)
+
+        val q = FormParser.parse("7-9/10/2026\nhalf day\nHoliclay", today)
+        assertEquals(LocalDate.of(2026, 10, 7), q.start)
+        assertEquals(LocalDate.of(2026, 10, 9), q.end)
+        assertEquals(50, q.daysX100)
+        assertEquals(LeaveType.HOLIDAY, q.type)
+
+        val r = FormParser.parse("nothing useful here", today)
+        assertEquals(0, r.foundCount)
     }
 }

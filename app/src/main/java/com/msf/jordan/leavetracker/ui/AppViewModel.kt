@@ -1,23 +1,34 @@
 package com.msf.jordan.leavetracker.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.msf.jordan.leavetracker.data.Repository
 import com.msf.jordan.leavetracker.logic.AppData
 import com.msf.jordan.leavetracker.logic.AppSettings
 import com.msf.jordan.leavetracker.logic.LeaveEntry
-import com.msf.jordan.leavetracker.logic.LeavePart
 import com.msf.jordan.leavetracker.logic.LeaveType
-import com.msf.jordan.leavetracker.logic.Rules
+import com.msf.jordan.leavetracker.logic.ParsedForm
+import com.msf.jordan.leavetracker.logic.Tr
+import com.msf.jordan.leavetracker.logic.tr
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.util.Locale
 import java.util.UUID
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = Repository(app.filesDir)
+    private val prefs = app.getSharedPreferences("prefs", Context.MODE_PRIVATE)
+
+    var arabic by mutableStateOf(prefs.getString("lang", null)?.let { it == "ar" } ?: (Locale.getDefault().language == "ar"))
+        private set
 
     var data by mutableStateOf(AppData.EMPTY)
         private set
@@ -26,13 +37,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var message by mutableStateOf<String?>(null)
         private set
 
+    var refreshing by mutableStateOf(false)
+        private set
+
+    /** Increases on every refresh so screens recompute "today" and totals. */
+    var refreshTick by mutableIntStateOf(0)
+        private set
+
+    /** Result of a scanned form waiting to open in the editor. */
+    var pendingScan by mutableStateOf<ParsedForm?>(null)
+
     init {
+        Tr.arabic = arabic
         val r = repo.load()
         data = r.data
         message = r.warning
     }
 
     fun today(): LocalDate = LocalDate.now()
+
+    fun setLanguage(ar: Boolean) {
+        Tr.arabic = ar
+        arabic = ar
+        prefs.edit().putString("lang", if (ar) "ar" else "en").apply()
+    }
 
     fun consumeMessage() {
         message = null
@@ -42,39 +70,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         message = text
     }
 
+    /** Pull-to-refresh: re-reads the saved file and recalculates everything. */
+    fun refresh() {
+        if (refreshing) return
+        refreshing = true
+        val r = repo.load()
+        data = r.data
+        refreshTick++
+        if (r.warning != null) message = r.warning
+        viewModelScope.launch {
+            delay(500)
+            refreshing = false
+        }
+    }
+
     private fun commit(newData: AppData): Boolean {
         val sorted = newData.copy(entries = newData.entries.sortedWith(compareBy<LeaveEntry> { it.start }.thenBy { it.createdAt }))
         return if (repo.save(sorted)) {
             data = sorted
             true
         } else {
-            message = "تعذّر الحفظ في ذاكرة الهاتف. تأكد من وجود مساحة كافية ثم حاول مجدداً."
+            message = tr(
+                "تعذّر الحفظ في ذاكرة الهاتف. تأكد من وجود مساحة كافية ثم حاول مجدداً.",
+                "Could not save to the phone storage. Free some space and try again.",
+            )
             false
         }
     }
 
-    fun saveSettings(s: AppSettings): Boolean {
-        // If the weekend changed, re-check stored holidays never cross a payslip boundary.
-        val entries = Rules.normalize(data.entries, s.weekend)
-        return commit(AppData(s, entries))
-    }
+    fun saveSettings(s: AppSettings): Boolean = commit(data.copy(settings = s))
 
-    fun saveLeave(editingId: String?, type: LeaveType, parts: List<LeavePart>, note: String): Boolean {
-        if (parts.isEmpty()) return false
-        val now = System.currentTimeMillis()
-        val kept = data.entries.filter { it.id != editingId }
-        val created = parts.mapIndexed { i, p ->
-            LeaveEntry(
-                id = if (i == 0 && editingId != null) editingId else UUID.randomUUID().toString(),
-                type = type,
-                start = p.start,
-                end = p.end,
-                daysX100 = p.daysX100,
-                note = note.trim(),
-                createdAt = now + i,
-            )
-        }
-        return commit(data.copy(entries = kept + created))
+    fun saveLeave(editingId: String?, type: LeaveType, start: LocalDate, end: LocalDate, daysX100: Int, note: String): Boolean {
+        val old = data.entries.firstOrNull { it.id == editingId }
+        val entry = LeaveEntry(
+            id = editingId ?: UUID.randomUUID().toString(),
+            type = type,
+            start = start,
+            end = end,
+            daysX100 = daysX100,
+            note = note.trim(),
+            createdAt = old?.createdAt ?: System.currentTimeMillis(),
+        )
+        return commit(data.copy(entries = data.entries.filter { it.id != editingId } + entry))
     }
 
     fun delete(id: String): LeaveEntry? {

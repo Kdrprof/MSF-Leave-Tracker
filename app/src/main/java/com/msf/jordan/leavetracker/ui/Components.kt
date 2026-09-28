@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -43,12 +44,15 @@ import com.msf.jordan.leavetracker.logic.Issue
 import com.msf.jordan.leavetracker.logic.IssueLevel
 import com.msf.jordan.leavetracker.logic.LeaveType
 import com.msf.jordan.leavetracker.logic.Rules
+import com.msf.jordan.leavetracker.logic.Tr
+import com.msf.jordan.leavetracker.logic.tr
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
 val Navy = Color(0xFF1E3A8A)
 val Amber = Color(0xFFF59E0B)
+val BalanceGreen = Color(0xFF34D399)
 
 private val LightColors = lightColorScheme(
     primary = Navy,
@@ -103,7 +107,7 @@ fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composab
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.padding(top = 8.dp))
+            Spacer(Modifier.height(8.dp))
             content()
         }
     }
@@ -111,15 +115,18 @@ fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composab
 
 @Composable
 fun IssueBox(issue: Issue) {
-    val (bg, fg, icon) = when (issue.level) {
-        IssueLevel.ERROR -> Triple(MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer, Icons.Filled.Warning)
-        IssueLevel.WARNING -> Triple(Amber.copy(alpha = 0.18f), MaterialTheme.colorScheme.onSurface, Icons.Filled.Warning)
-        IssueLevel.INFO -> Triple(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, Icons.Filled.CheckCircle)
-    }
-    val tint = when (issue.level) {
-        IssueLevel.ERROR -> MaterialTheme.colorScheme.error
-        IssueLevel.WARNING -> Amber
-        IssueLevel.INFO -> fg
+    val (bg, fg, tint) = when (issue.level) {
+        IssueLevel.ERROR -> Triple(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            MaterialTheme.colorScheme.error,
+        )
+        IssueLevel.WARNING -> Triple(Amber.copy(alpha = 0.18f), MaterialTheme.colorScheme.onSurface, Amber)
+        IssueLevel.INFO -> Triple(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
     Row(
         Modifier
@@ -129,7 +136,12 @@ fun IssueBox(issue: Issue) {
             .padding(10.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Icon(icon, null, Modifier.size(18.dp), tint = tint)
+        Icon(
+            if (issue.level == IssueLevel.INFO) Icons.Filled.CheckCircle else Icons.Filled.Warning,
+            null,
+            Modifier.size(18.dp),
+            tint = tint,
+        )
         Spacer(Modifier.width(8.dp))
         Text(issue.text, color = fg, style = MaterialTheme.typography.bodyMedium)
     }
@@ -142,9 +154,15 @@ fun IssuesList(issues: List<Issue>) {
     }
 }
 
+/** Colored dot; gets a thin outline so the black «Compassionate» dot is visible in dark mode. */
 @Composable
 fun TypeDot(type: LeaveType, size: Int = 12) {
-    Box(Modifier.size(size.dp).background(type.color(), CircleShape))
+    Box(
+        Modifier
+            .size(size.dp)
+            .background(type.color(), CircleShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+    )
 }
 
 @Composable
@@ -170,8 +188,10 @@ fun TypeSelector(selected: LeaveType, onSelect: (LeaveType) -> Unit) {
                         TypeDot(t)
                         Spacer(Modifier.width(8.dp))
                         Column {
-                            Text(t.ar, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
-                            Text(t.en, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(t.title, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
+                            if (Tr.arabic) {
+                                Text(t.en, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
@@ -194,7 +214,7 @@ fun DateField(label: String, date: LocalDate, onClick: () -> Unit) {
     ) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("${Rules.fmtDate(date)}  •  ${Rules.dayName(date)}", style = MaterialTheme.typography.bodyLarge)
+            Text("${Rules.fmtDate(date)}  •  ${Tr.dayName(date)}", style = MaterialTheme.typography.bodyLarge)
         }
         Icon(Icons.Filled.DateRange, null, tint = MaterialTheme.colorScheme.primary)
     }
@@ -211,10 +231,13 @@ fun DatePickDialog(initial: LocalDate, onDismiss: () -> Unit, onPicked: (LocalDa
                 val ms = state.selectedDateMillis
                 if (ms != null) onPicked(ms.utcMillisToLocalDate())
                 onDismiss()
-            }) { Text("تم") }
+            }) { Text(tr("تم", "OK")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("إلغاء") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tr("إلغاء", "Cancel")) } },
     ) {
         DatePicker(state = state)
     }
 }
+
+/** Day amount for the UI, e.g. «2.5 يوم» / «2.5 days». */
+fun daysText(x100: Int): String = Rules.fmtDays(x100) + tr(" يوم", if (x100 == 100) " day" else " days")

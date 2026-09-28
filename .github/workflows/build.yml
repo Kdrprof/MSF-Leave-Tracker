@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -51,24 +51,24 @@ jobs:
           ./gradlew assembleRelease --no-daemon --stacktrace
           -PversionCode=${{ github.run_number }}
           -PversionName=${{ env.VERSION_NAME }}
-          -PreleaseUrl=https://github.com/${{ github.repository }}/releases/latest/download/MSF-Leave-Tracker.apk
+          -PreleaseUrl=https://github.com/${{ github.repository }}/releases/latest/download/Leave-Tracker.apk
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk MSF-Leave-Tracker.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Leave-Tracker.apk
 
       - name: Upload APK (Actions artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: MSF-Leave-Tracker-${{ env.VERSION_NAME }}
-          path: MSF-Leave-Tracker.apk
+          name: Leave-Tracker-${{ env.VERSION_NAME }}
+          path: Leave-Tracker.apk
 
       - name: Publish GitHub Release (direct download link)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION_NAME }}
-          name: MSF Leave Tracker ${{ env.VERSION_NAME }}
+          name: Leave Tracker ${{ env.VERSION_NAME }}
           body: |
-            حمّل ملف MSF-Leave-Tracker.apk من الأسفل وثبّته على هاتف أندرويد 8 أو أحدث.
-            رابط دائم لآخر إصدار: https://github.com/${{ github.repository }}/releases/latest/download/MSF-Leave-Tracker.apk
-          files: MSF-Leave-Tracker.apk
+            حمّل ملف Leave-Tracker.apk من الأسفل وثبّته على هاتف أندرويد 8 أو أحدث.
+            رابط دائم لآخر إصدار: https://github.com/${{ github.repository }}/releases/latest/download/Leave-Tracker.apk
+          files: Leave-Tracker.apk
           make_latest: true

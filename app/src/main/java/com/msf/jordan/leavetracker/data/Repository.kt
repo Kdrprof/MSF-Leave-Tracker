@@ -8,6 +8,7 @@ import com.msf.jordan.leavetracker.logic.MAX_BALANCE_X100
 import com.msf.jordan.leavetracker.logic.MAX_NOTE_LENGTH
 import com.msf.jordan.leavetracker.logic.MIN_BALANCE_X100
 import com.msf.jordan.leavetracker.logic.Rules
+import com.msf.jordan.leavetracker.logic.tr
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -59,10 +60,10 @@ object JsonCodec {
         val root = try {
             JSONObject(text)
         } catch (e: Exception) {
-            throw BackupFormatException("الملف ليس نسخة احتياطية صالحة (ليس JSON).")
+            throw BackupFormatException(tr("الملف ليس نسخة احتياطية صالحة.", "This file is not a valid backup."))
         }
-        if (root.optString("app") != APP_ID) throw BackupFormatException("هذا الملف ليس نسخة احتياطية من تطبيق MSF Leave Tracker.")
-        if (root.optInt("version", 0) > VERSION) throw BackupFormatException("النسخة الاحتياطية من إصدار أحدث من التطبيق. حدّث التطبيق أولاً.")
+        if (root.optString("app") != APP_ID) throw BackupFormatException(tr("هذا الملف ليس نسخة احتياطية من هذا التطبيق.", "This file is not a backup from this app."))
+        if (root.optInt("version", 0) > VERSION) throw BackupFormatException(tr("النسخة من إصدار أحدث. حدّث التطبيق أولاً.", "Backup is from a newer version. Update the app first."))
 
         var settings: AppSettings? = null
         val so = root.optJSONObject("settings")
@@ -81,7 +82,7 @@ object JsonCodec {
                 } else weekend += Rules.DEFAULT_WEEKEND
                 settings = AppSettings(so.optString("name", "").take(60), bal, month, weekend)
             } catch (e: Exception) {
-                throw BackupFormatException("إعدادات النسخة الاحتياطية تالفة.")
+                throw BackupFormatException(tr("إعدادات النسخة الاحتياطية تالفة.", "Backup settings are damaged."))
             }
         }
 
@@ -106,8 +107,7 @@ object JsonCodec {
                 skipped++
             }
         }
-        val weekend = settings?.weekend ?: Rules.DEFAULT_WEEKEND
-        return DecodeResult(AppData(settings, Rules.normalize(entries, weekend).sortedBy { it.start }), skipped)
+        return DecodeResult(AppData(settings, entries.sortedBy { it.start }), skipped)
     }
 }
 
@@ -124,7 +124,7 @@ class Repository(dir: File) {
         try {
             if (main.exists()) {
                 val r = JsonCodec.decode(main.readText())
-                val w = if (r.skipped > 0) "تم تجاهل ${r.skipped} سجل تالف أثناء التحميل." else null
+                val w = if (r.skipped > 0) tr("تم تجاهل ${r.skipped} سجل تالف.", "${r.skipped} damaged records were skipped.") else null
                 return LoadResult(r.data, w)
             }
         } catch (_: Exception) {
@@ -135,12 +135,12 @@ class Repository(dir: File) {
                 val r = JsonCodec.decode(bak.readText())
                 if (main.exists()) main.renameTo(File(main.parentFile, "leave_data.corrupt.${System.currentTimeMillis()}.json"))
                 save(r.data)
-                return LoadResult(r.data, "كان ملف البيانات تالفاً، وتمت استعادة آخر نسخة سليمة تلقائياً.")
+                return LoadResult(r.data, tr("كان ملف البيانات تالفاً، وتمت استعادة آخر نسخة سليمة تلقائياً.", "Data file was damaged; the last good copy was restored."))
             }
         } catch (_: Exception) {
         }
         if (main.exists()) main.renameTo(File(main.parentFile, "leave_data.corrupt.${System.currentTimeMillis()}.json"))
-        return LoadResult(AppData.EMPTY, "تعذّرت قراءة البيانات المحفوظة. إن كان لديك نسخة احتياطية، استعدها من الإعدادات.")
+        return LoadResult(AppData.EMPTY, tr("تعذّرت قراءة البيانات. إن كان لديك نسخة احتياطية استعدها من الإعدادات.", "Could not read saved data. Restore a backup from Settings if you have one."))
     }
 
     fun save(data: AppData): Boolean = try {
