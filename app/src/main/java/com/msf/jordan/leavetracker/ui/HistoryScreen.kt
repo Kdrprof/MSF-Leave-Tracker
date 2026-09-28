@@ -81,15 +81,25 @@ fun HistoryScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit, onDeleted: (L
                 label = { Text(tr("بحث", "Search")) },
                 placeholder = { Text(tr("نوع، تاريخ (05/08)، شهر، ملاحظة…", "Type, date (05/08), month, note…")) },
             )
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterPill(tr("الكل", "All"), null, filter == null) { filterKey = null }
-                LeaveType.entries.forEach { t -> FilterPill(t.title, t.color(), filter == t) { filterKey = t.key } }
+            // Filter by type — every type is visible at once, with its total across all your leaves.
+            val allTotals = Rules.totalsByType(vm.data.entries.filter { Rules.matchesSearch(it, query) })
+            val allSum = allTotals.values.sum()
+            Column(Modifier.padding(vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val chips: List<LeaveType?> = listOf(null) + LeaveType.entries
+                chips.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { t ->
+                            TypeChip(
+                                label = t?.title?.removePrefix("إجازة ") ?: tr("الكل", "All"),
+                                total = if (t == null) allSum else allTotals[t] ?: 0,
+                                dot = t?.color(),
+                                selected = filter == t,
+                                modifier = Modifier.weight(1f),
+                            ) { filterKey = t?.key }
+                        }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
             }
             Text(
                 tr("${list.size} سجل • المجموع ${daysText(list.sumOf { it.daysX100 })}", "${list.size} records • total ${daysText(list.sumOf { it.daysX100 })}"),
@@ -203,5 +213,40 @@ private fun FilterPill(text: String, dot: Color?, selected: Boolean, onClick: ()
             Spacer(Modifier.width(6.dp))
         }
         Text(text, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+/** Filter chip that shows a leave type and its total days; zero-total types are dimmed. */
+@Composable
+private fun TypeChip(label: String, total: Int, dot: Color?, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(12.dp)
+    val dim = total == 0 && !selected
+    Column(
+        modifier
+            .border(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, shape)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (dot != null) {
+                Box(Modifier.size(9.dp).background(dot, CircleShape))
+                Spacer(Modifier.width(5.dp))
+            }
+            Text(
+                label,
+                fontSize = 13.sp,
+                maxLines = 1,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (dim) 0.45f else 1f),
+            )
+        }
+        Text(
+            Rules.fmtDays(total),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (dim) 0.45f else 1f),
+        )
     }
 }
