@@ -22,6 +22,15 @@ import java.time.LocalDate
 import java.util.Locale
 import java.util.UUID
 
+data class HomePrefs(
+    val previousSlip: Boolean,
+    val upcomingSlips: Boolean,
+    val slipDetails: Boolean,
+    val totals: Boolean,
+    val thisMonth: Boolean,
+    val upcoming: Boolean,
+)
+
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = Repository(app.filesDir)
@@ -43,6 +52,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Increases on every refresh so screens recompute "today" and totals. */
     var refreshTick by mutableIntStateOf(0)
         private set
+
+    /** What the home screen shows (Settings → Home screen). */
+    var homePrefs by mutableStateOf(loadHomePrefs())
+        private set
+
+    private fun loadHomePrefs() = HomePrefs(
+        previousSlip = prefs.getBoolean("home_prev_slip", true),
+        upcomingSlips = prefs.getBoolean("home_next_slips", false),
+        slipDetails = prefs.getBoolean("home_slip_details", false),
+        totals = prefs.getBoolean("home_totals", false),
+        thisMonth = prefs.getBoolean("home_this_month", false),
+        upcoming = prefs.getBoolean("home_upcoming", false),
+    )
+
+    fun updateHomePrefs(p: HomePrefs) {
+        homePrefs = p
+        prefs.edit()
+            .putBoolean("home_prev_slip", p.previousSlip)
+            .putBoolean("home_next_slips", p.upcomingSlips)
+            .putBoolean("home_slip_details", p.slipDetails)
+            .putBoolean("home_totals", p.totals)
+            .putBoolean("home_this_month", p.thisMonth)
+            .putBoolean("home_upcoming", p.upcoming)
+            .apply()
+    }
 
     /** Result of a scanned form waiting to open in the editor. */
     var pendingScan by mutableStateOf<ParsedForm?>(null)

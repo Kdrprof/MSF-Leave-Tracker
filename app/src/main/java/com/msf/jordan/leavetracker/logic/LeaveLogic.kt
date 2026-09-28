@@ -142,6 +142,14 @@ data class Summary(
     val upcoming: List<LeaveEntry>,
     /** Holidays recorded in the app that belong to the reference payslip (to compare with its «Accounted»). */
     val recordedOnOpeningSlipX100: Int = 0,
+    /**
+     * THE home-screen number: balance at the end of the current month.
+     * = this month's payslip Remaining − holidays taken/planned later this month (16th+ go to next payslip).
+     * Holidays in later months are NOT deducted.
+     */
+    val monthEndX100: Int = 0,
+    /** Holidays planned after the current month (not deducted from [monthEndX100]). */
+    val laterScheduledX100: Int = 0,
 ) {
     fun row(month: YearMonth): LedgerRow? = rows.firstOrNull { it.month == month }
 }
@@ -481,6 +489,14 @@ object Rules {
             m = m.plusMonths(1)
         }
         val pendingFuture = deductions.filterKeys { it.isAfter(current) }.values.sum()
+        var restOfMonth = 0
+        var later = 0
+        for (e in data.entries) {
+            if (!e.type.onPayslip) continue
+            val slip = payslipMonth(e.start)
+            if (!slip.isAfter(s.openingMonth) || !slip.isAfter(current)) continue
+            if (YearMonth.from(e.start) == current) restOfMonth += e.daysX100 else later += e.daysX100
+        }
         return Summary(
             currentMonth = current,
             currentSlipX100 = currentSlip,
@@ -492,6 +508,8 @@ object Rules {
             totalThisYearX100 = totalThisYear,
             upcoming = upcoming,
             recordedOnOpeningSlipX100 = recordedOnOpening,
+            monthEndX100 = currentSlip - restOfMonth,
+            laterScheduledX100 = later,
         )
     }
 

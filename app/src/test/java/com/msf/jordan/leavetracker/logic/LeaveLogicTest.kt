@@ -171,6 +171,26 @@ class LeaveLogicTest {
         assertEquals("13.29", Rules.fmtSlip(oct.remainingX100))
     }
 
+    @Test fun homeNumberIsEndOfCurrentMonth() {
+        val st = Rules.validateSettings(Rules.SettingsInput("", "9.55", "2.50", YearMonth.of(2026, 8), weekend), today).settings!!
+        val base = listOf(
+            entry("a", LeaveType.HOLIDAY, "2026-07-16", "2026-07-16", 100),
+            entry("b", LeaveType.HOLIDAY, "2026-08-03", "2026-08-03", 50),
+            entry("c", LeaveType.HOLIDAY, "2026-08-04", "2026-08-04", 100),
+        )
+        // Holiday on 1 Oct (next month) is NOT deducted from the home number
+        val withOct = Rules.summarize(AppData(st, base + entry("d", LeaveType.HOLIDAY, "2026-10-01", "2026-10-01", 100)), today)
+        assertEquals(1121, withOct.monthEndX100)
+        assertEquals(100, withOct.laterScheduledX100)
+        // Holiday on 29 Sep (this month, goes to Oct payslip) IS deducted
+        val withSep = Rules.summarize(AppData(st, base + entry("e", LeaveType.HOLIDAY, "2026-09-29", "2026-09-29", 100)), today)
+        assertEquals(1021, withSep.monthEndX100)
+        assertEquals(0, withSep.laterScheduledX100)
+        // Holiday on 10 Sep (Sep payslip) is already inside this month's Remaining
+        val with10 = Rules.summarize(AppData(st, base + entry("f", LeaveType.HOLIDAY, "2026-09-10", "2026-09-10", 100)), today)
+        assertEquals(1021, with10.monthEndX100)
+    }
+
     @Test fun calendarMarksSkipWeekendInsideRange() {
         val marks = Rules.calendarMarks(listOf(entry("a", LeaveType.HOLIDAY, "2026-09-24", "2026-09-28", 300)), 2026, weekend)
         assertEquals(3, marks.size)

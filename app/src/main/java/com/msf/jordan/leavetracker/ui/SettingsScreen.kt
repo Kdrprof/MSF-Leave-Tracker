@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Switch
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -304,6 +306,19 @@ fun SettingsScreen(vm: AppViewModel) {
             LanguageSwitch(vm)
         }
 
+        SectionCard(
+            tr("ما يظهر في الصفحة الرئيسية", "Home screen"),
+            help = tr("اختر الأقسام التي تريد رؤيتها تحت رصيدك. الرصيد المتبقي يظهر دائماً.", "Pick the sections shown under your balance. The remaining balance is always shown."),
+        ) {
+            val p = vm.homePrefs
+            PrefSwitch(tr("آخر سليب راتب (الشهر السابق)", "Last payslip (previous month)"), p.previousSlip) { vm.updateHomePrefs(p.copy(previousSlip = it)) }
+            PrefSwitch(tr("سليب هذا الشهر والشهر القادم (متوقع)", "This & next month payslips (expected)"), p.upcomingSlips) { vm.updateHomePrefs(p.copy(upcomingSlips = it)) }
+            PrefSwitch(tr("تفاصيل السليب (الفترة والإجازات المحتسبة)", "Payslip details (period & counted leaves)"), p.slipDetails) { vm.updateHomePrefs(p.copy(slipDetails = it)) }
+            PrefSwitch(tr("مجموع إجازاتي هذه السنة", "My totals this year"), p.totals) { vm.updateHomePrefs(p.copy(totals = it)) }
+            PrefSwitch(tr("إجازات هذا الشهر", "This month's leaves"), p.thisMonth) { vm.updateHomePrefs(p.copy(thisMonth = it)) }
+            PrefSwitch(tr("الإجازات القادمة", "Upcoming leaves"), p.upcoming) { vm.updateHomePrefs(p.copy(upcoming = it)) }
+        }
+
         SettingsForm(vm, firstRun = false, onSaved = {})
 
         SectionCard(
@@ -423,5 +438,19 @@ fun SettingsScreen(vm: AppViewModel) {
             },
             dismissButton = { TextButton(onClick = { confirmReset = 0 }) { Text(tr("إلغاء", "Cancel")) } },
         )
+    }
+}
+
+@Composable
+private fun PrefSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onChange(!checked) }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }

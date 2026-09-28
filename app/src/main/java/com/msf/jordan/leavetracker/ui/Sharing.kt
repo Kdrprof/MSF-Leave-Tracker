@@ -148,7 +148,7 @@ private object PdfReport {
         if (r.employee.isNotBlank()) text(tr("الموظف: ", "Employee: ") + r.employee, paint(12f))
         text(tr("تاريخ الإصدار: ", "Generated: ") + Rules.fmtDate(r.generatedOn), paint(11f, color = Color.DKGRAY), 10f)
         text(
-            tr("الرصيد السنوي المتبقي حالياً: ", "Remaining annual balance now: ") + Rules.fmtDays(r.availableX100) + tr(" يوم", " days"),
+            tr("الرصيد المتبقي حتى نهاية الشهر الحالي: ", "Remaining balance at the end of this month: ") + Rules.fmtDays(r.availableX100) + tr(" يوم", " days"),
             paint(16f, true, Color.rgb(16, 185, 129)),
             10f,
         )

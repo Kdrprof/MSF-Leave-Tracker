@@ -28,7 +28,7 @@ object Reports {
             totals = Rules.totalsByType(list),
             totalX100 = list.sumOf { it.daysX100 },
             ledger = summary.rows.filter { it.month == month },
-            availableX100 = summary.availableX100,
+            availableX100 = summary.monthEndX100,
         )
     }
 
@@ -43,7 +43,7 @@ object Reports {
             totals = Rules.totalsByType(list),
             totalX100 = list.sumOf { it.daysX100 },
             ledger = summary.rows.filter { it.month.year == year },
-            availableX100 = summary.availableX100,
+            availableX100 = summary.monthEndX100,
         )
     }
 
@@ -53,7 +53,7 @@ object Reports {
         if (r.employee.isNotBlank()) appendLine(tr("الموظف: ", "Employee: ") + r.employee)
         appendLine(tr("تاريخ الإصدار: ", "Generated: ") + Rules.fmtDate(r.generatedOn))
         appendLine()
-        appendLine(tr("الرصيد المتبقي حالياً: ", "Remaining balance now: ") + Rules.fmtDays(r.availableX100) + tr(" يوم", " days"))
+        appendLine(tr("الرصيد المتبقي حتى نهاية الشهر الحالي: ", "Remaining balance at the end of this month: ") + Rules.fmtDays(r.availableX100) + tr(" يوم", " days"))
         appendLine()
         appendLine(tr("المجموع حسب النوع:", "Totals by type:"))
         LeaveType.entries.forEach { t ->
