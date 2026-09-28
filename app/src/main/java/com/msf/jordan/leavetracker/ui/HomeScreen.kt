@@ -131,9 +131,9 @@ fun HomeScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit, onOpenSettings: 
                 ),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (prevRow != null) SlipCard(tr("الشهر السابق: ", "Last month: ") + Tr.monthLabel(prevRow.month), tr("صادر", "Issued"), prevRow)
-                    if (curRow != null) SlipCard(tr("هذا الشهر: ", "This month: ") + Tr.monthLabel(curRow.month), tr("متوقع", "Expected"), curRow.copy(projected = true), highlight = true)
-                    if (nextRow != null) SlipCard(tr("الشهر القادم: ", "Next month: ") + Tr.monthLabel(nextRow.month), tr("متوقع", "Expected"), nextRow)
+                    if (prevRow != null) SlipCard(tr("الشهر السابق: ", "Last month: ") + Tr.monthLabel(prevRow.month), tr("صادر", "Issued"), prevRow, note = Rules.slipTimeline(data.entries, prevRow.month))
+                    if (curRow != null) SlipCard(tr("هذا الشهر: ", "This month: ") + Tr.monthLabel(curRow.month), tr("متوقع", "Expected"), curRow.copy(projected = true), highlight = true, note = Rules.slipTimeline(data.entries, curRow.month))
+                    if (nextRow != null) SlipCard(tr("الشهر القادم: ", "Next month: ") + Tr.monthLabel(nextRow.month), tr("متوقع", "Expected"), nextRow, note = Rules.slipTimeline(data.entries, nextRow.month))
                 }
             }
         }

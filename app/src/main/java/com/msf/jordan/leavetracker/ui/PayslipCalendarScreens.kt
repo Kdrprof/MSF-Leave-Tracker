@@ -95,10 +95,11 @@ fun PayslipScreen(vm: AppViewModel) {
                 badge,
                 if (r.month.isAfter(s.currentMonth.minusMonths(1))) r.copy(projected = true) else r,
                 highlight = r.month == s.currentMonth,
-                note = if (isRef && settings!!.hasSlipDetails && s.recordedOnOpeningSlipX100 != settings.slipAccountedX100) tr(
-                    "المسجّل في التطبيق لهذا السليب: ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}",
-                    "Recorded in the app for this payslip: ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}",
-                ) else null,
+                note = Rules.slipTimeline(vm.data.entries, r.month) +
+                    if (isRef && settings!!.hasSlipDetails && s.recordedOnOpeningSlipX100 != settings.slipAccountedX100) tr(
+                        "\n⚠️ رقم «المحتسب» منقول من سليبك (${Rules.fmtSlip(settings.slipAccountedX100 ?: 0)})، والمسجّل في التطبيق لهذه الفترة = ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}",
+                        "\n⚠️ «Accounted» is copied from your payslip (${Rules.fmtSlip(settings.slipAccountedX100 ?: 0)}); recorded in the app for this period = ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}",
+                    ) else "",
             )
         }
         item(key = "foot") { Spacer(Modifier.height(80.dp)) }

@@ -163,6 +163,36 @@ object Rules {
         return if (start.dayOfMonth <= 15) ym else ym.plusMonths(1)
     }
 
+    /** Leave period covered by a payslip: 16th of the previous month → 15th of this month. */
+    fun slipPeriod(month: YearMonth): Pair<LocalDate, LocalDate> =
+        month.minusMonths(1).atDay(16) to month.atDay(15)
+
+    /** Holidays counted («Accounted») on the payslip of [month], oldest first. */
+    fun holidaysOnSlip(entries: List<LeaveEntry>, month: YearMonth): List<LeaveEntry> =
+        entries.filter { it.type.onPayslip && payslipMonth(it.start) == month }.sortedBy { it.start }
+
+    /** Time-line text under a payslip card: period, where «Previous» comes from, counted leaves, carry-over. */
+    fun slipTimeline(entries: List<LeaveEntry>, month: YearMonth): String {
+        val (from, to) = slipPeriod(month)
+        val leaves = holidaysOnSlip(entries, month)
+        val short = java.time.format.DateTimeFormatter.ofPattern("dd/MM")
+        val list = if (leaves.isEmpty()) tr("لا يوجد", "none")
+        else leaves.joinToString(" • ") { e ->
+            val d = if (e.start == e.end) e.start.format(short) else "${e.start.format(short)}–${e.end.format(short)}"
+            "$d (${fmtDays(e.daysX100)})"
+        }
+        return tr(
+            "🗓️ فترة الاحتساب: ${fmtDate(from)} ← ${fmtDate(to)}\n" +
+                "📥 الرصيد السابق = المتبقي من سليب ${Tr.monthLabel(month.minusMonths(1))}\n" +
+                "📋 الإجازات السنوية المحتسبة: $list\n" +
+                "➡️ المتبقي يُرحَّل إلى سليب ${Tr.monthLabel(month.plusMonths(1))}",
+            "🗓️ Period: ${fmtDate(from)} → ${fmtDate(to)}\n" +
+                "📥 Previous = Remaining of the ${Tr.monthLabel(month.minusMonths(1))} payslip\n" +
+                "📋 Holidays accounted: $list\n" +
+                "➡️ Remaining carries to the ${Tr.monthLabel(month.plusMonths(1))} payslip",
+        )
+    }
+
     fun calendarDays(start: LocalDate, end: LocalDate): Long =
         if (end.isBefore(start)) 0 else ChronoUnit.DAYS.between(start, end) + 1
 

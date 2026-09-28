@@ -157,6 +157,15 @@ class LeaveLogicTest {
         assertEquals("9.13", Rules.fmtSlip(sep.previousX100))
         assertEquals("11.21", Rules.fmtSlip(sep.remainingX100))
         assertEquals(1121, s.availableX100)
+        // Time line of the August payslip: 16/07 → 15/08, previous from July, carries to September
+        assertEquals(LocalDate.of(2026, 7, 16) to LocalDate.of(2026, 8, 15), Rules.slipPeriod(YearMonth.of(2026, 8)))
+        assertEquals(3, Rules.holidaysOnSlip(data.entries, YearMonth.of(2026, 8)).size)
+        Tr.arabic = false
+        val t = Rules.slipTimeline(data.entries, YearMonth.of(2026, 8))
+        assertTrue(t.contains("16/07/2026 → 15/08/2026"))
+        assertTrue(t.contains("July 2026") && t.contains("September 2026"))
+        assertTrue(t.contains("16/07 (1) • 03/08 (0.5) • 04/08 (1)"))
+        Tr.arabic = true
         val oct = s.row(YearMonth.of(2026, 10))!!    // next month always shown (expected)
         assertTrue(oct.projected)
         assertEquals("13.29", Rules.fmtSlip(oct.remainingX100))

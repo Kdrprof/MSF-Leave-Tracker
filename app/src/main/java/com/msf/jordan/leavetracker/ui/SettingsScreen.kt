@@ -122,7 +122,10 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
 
             FieldHeader(
                 tr("الرصيد السابق (Previous balance)", "Previous balance"),
-                tr("أول رقم في مربع Paid leave. مثال من سليب آب 2026: 9.55", "First number in the Paid leave box. Example (Aug 2026): 9.55"),
+                tr(
+                    "أول رقم في مربع Paid leave، وهو الرصيد المُرحَّل من سليب الشهر الذي قبله. مثال: سليب آب 2026 ← 9.55 (هو متبقي سليب تموز).",
+                    "First number in the Paid leave box: the balance carried from the previous month's payslip. Example: Aug 2026 → 9.55 (July's Remaining).",
+                ),
             )
             OutlinedTextField(
                 value = previous,
@@ -137,7 +140,10 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
 
             FieldHeader(
                 tr("المحتسب هذا الشهر (Accounted this month)", "Accounted this month"),
-                tr("الرقم الثاني في المربع: الإجازات السنوية التي خُصمت في هذا السليب. اكتب 0 إذا لم يُخصم شيء. مثال: 2.50", "Second number in the box: holidays deducted on this payslip. Type 0 if none. Example: 2.50"),
+                tr(
+                    "الرقم الثاني: الإجازات السنوية التي يبدأ أول يوم فيها من 16 الشهر الماضي حتى 15 شهر السليب. مثال: سليب آب ← إجازات 16 تموز حتى 15 آب = 2.50. اكتب 0 إذا لا يوجد.",
+                    "Second number: holidays whose first day is from the 16th of last month to the 15th of the payslip month. Example: Aug payslip → 16 Jul–15 Aug = 2.50. Type 0 if none.",
+                ),
             )
             OutlinedTextField(
                 value = accounted,
