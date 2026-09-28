@@ -159,22 +159,37 @@ fun LeaveEditorScreen(
                 ))
             }
 
-            SectionCard(tr("1. نوع الإجازة", "1. Leave type")) {
+            SectionCard(
+                tr("1. نوع الإجازة", "1. Leave type"),
+                help = tr(
+                    "اختر نفس النوع المكتوب في نموذج الطلب.\n\n• السنوية (Holiday): الوحيدة التي تُخصم من الرصيد وتظهر في السليب.\n• باقي الأنواع: تُحسب في المجاميع والسجل والتقويم فقط.",
+                    "Pick the same type as on the request form.\n\n• Holiday: the only type deducted from the balance and shown on the payslip.\n• Other types: counted in totals, history and calendar only.",
+                ),
+            ) {
                 TypeSelector(type) { typeKey = it.key }
-                Hint(type.hint)
+                Spacer(Modifier.height(6.dp))
+                Text(type.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            SectionCard(tr("2. التاريخ", "2. Dates")) {
+            SectionCard(
+                tr("2. التاريخ", "2. Dates"),
+                help = tr(
+                    "«من» = أول يوم إجازة، و«إلى» = آخر يوم إجازة (وليس يوم العودة).\n\nليوم واحد أو نصف يوم اجعلهما نفس التاريخ.\n\nالإجازة السنوية تُحسب في سليب الشهر حسب «من»: من 1 إلى 15 ← سليب نفس الشهر، من 16 فما فوق ← سليب الشهر التالي.",
+                    "«From» = first day off, «To» = last day off (not the return day).\n\nFor one day or half a day keep them the same.\n\nA Holiday goes to a payslip by its «From» date: 1–15 → same month, 16+ → next month.",
+                ),
+            ) {
                 DateField(tr("من (أول يوم إجازة)", "From (first day off)"), start) { picking = PickTarget.START }
                 Spacer(Modifier.height(10.dp))
                 DateField(tr("إلى (آخر يوم إجازة)", "To (last day off)"), end) { picking = PickTarget.END }
-                Hint(tr(
-                    "لإجازة يوم واحد أو نصف يوم اجعل «من» و«إلى» نفس اليوم. «إلى» هو آخر يوم إجازة وليس يوم العودة.",
-                    "For one day or half a day keep «From» and «To» the same. «To» is the last day off, not the return day.",
-                ))
             }
 
-            SectionCard(tr("3. عدد الأيام (كما في نموذج الطلب)", "3. Number of days (as on the form)")) {
+            SectionCard(
+                tr("3. عدد الأيام", "3. Number of days"),
+                help = tr(
+                    "اكتب نفس العدد المكتوب في نموذج الطلب (Numbers of days requested): 0.5 أو 1 أو أكثر، بمضاعفات النصف.\n\nزر «حسب التواريخ» يحسب أيام العمل بين التاريخين بدون الجمعة والسبت، ويمكنك تعديله إذا صادفت عطلة رسمية.",
+                    "Type the same number as on the request form (Numbers of days requested): 0.5, 1 or more, in halves.\n\n«By dates» counts working days between the dates without weekends; change it if there was a public holiday.",
+                ),
+            ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
                     QuickDays(tr("نصف يوم", "Half day"), "0.5", daysInput) {
                         daysInput = it
@@ -207,13 +222,18 @@ fun LeaveEditorScreen(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Hint(tr(
-                    "اكتب نفس العدد المكتوب في نموذج الطلب: 0.5 أو 1 أو أكثر. أيام العمل في الفترة = ${Rules.fmtDays(suggested)} (بدون الجمعة والسبت).",
-                    "Use the same number written on the request form: 0.5, 1 or more. Working days in the period = ${Rules.fmtDays(suggested)} (weekends excluded).",
-                ))
+                Text(
+                    tr("أيام العمل في الفترة: ${Rules.fmtDays(suggested)}", "Working days in the period: ${Rules.fmtDays(suggested)}"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
             }
 
-            SectionCard(tr("4. ملاحظة (اختياري)", "4. Note (optional)")) {
+            SectionCard(
+                tr("4. ملاحظة (اختياري)", "4. Note (optional)"),
+                help = tr("أي تفاصيل تساعدك على التذكّر، مثل رقم الطلب. تظهر في السجل والبحث وكشف PDF.", "Anything that helps you remember, like the request number. Shown in history, search and the PDF."),
+            ) {
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it.take(MAX_NOTE_LENGTH) },
@@ -223,11 +243,13 @@ fun LeaveEditorScreen(
                     maxLines = 3,
                     supportingText = { Text("${note.length}/$MAX_NOTE_LENGTH") },
                 )
-                Hint(tr("تظهر في السجل والبحث فقط.", "Shown in history and search only."))
             }
 
             if (result.issues.isNotEmpty()) {
-                SectionCard(tr("المراجعة قبل الحفظ", "Check before saving")) { IssuesList(result.issues) }
+                SectionCard(
+                    tr("المراجعة قبل الحفظ", "Check before saving"),
+                    help = tr("🔴 أحمر = خطأ يمنع الحفظ.\n🟠 برتقالي = تنبيه، يمكنك الحفظ بعد التأكيد.\n🔵 أزرق = معلومة: في أي سليب ستُخصم الإجازة.", "🔴 Red = error, can't save.\n🟠 Orange = warning, save after confirming.\n🔵 Blue = info: which payslip it goes to."),
+                ) { IssuesList(result.issues) }
             }
             if (hasErrors && triedSave) {
                 Text(

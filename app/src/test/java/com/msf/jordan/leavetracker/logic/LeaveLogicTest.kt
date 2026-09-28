@@ -40,7 +40,7 @@ class LeaveLogicTest {
             entry("b", LeaveType.HOLIDAY, "2026-08-03", "2026-08-03", 50),  // → Aug slip
             entry("c", LeaveType.SICK, "2026-08-05", "2026-08-05", 100),    // never on slip
         ))
-        val row = Rules.summarize(data, LocalDate.of(2026, 8, 20)).rows.first()
+        val row = Rules.summarize(data, LocalDate.of(2026, 8, 20)).row(YearMonth.of(2026, 8))!!
         assertEquals(YearMonth.of(2026, 8), row.month)
         assertEquals("9.55", Rules.fmtSlip(row.previousX100))
         assertEquals("2.50", Rules.fmtSlip(row.accountedX100))
@@ -125,14 +125,41 @@ class LeaveLogicTest {
     }
 
     @Test fun settingsValidation() {
-        fun v(t: String, m: YearMonth = YearMonth.of(2026, 8)) =
-            Rules.validateSettings(Rules.SettingsInput("Khader", t, m, weekend), today)
-        assertFalse(v("9.13").hasErrors)
-        assertTrue(v("").balanceInvalid)
+        fun v(prev: String, acc: String = "0", m: YearMonth = YearMonth.of(2026, 8)) =
+            Rules.validateSettings(Rules.SettingsInput("Khader", prev, acc, m, weekend), today)
+        val ok = v("9.55", "2.50")
+        assertFalse(ok.hasErrors)
+        assertEquals(913, ok.remainingX100)
+        assertEquals(913, ok.settings!!.openingBalanceX100)
+        assertEquals(955, ok.settings!!.slipPreviousX100)
+        assertEquals(250, ok.settings!!.slipAccountedX100)
+        assertTrue(v("").previousInvalid)
+        assertTrue(v("9.55", "abc").accountedInvalid)
         assertTrue(v("12.555").hasErrors)
         assertTrue(v("500").hasErrors)
-        assertTrue(v("10", YearMonth.of(2026, 11)).hasErrors)
-        assertEquals(913, v("9.13").settings!!.openingBalanceX100)
+        assertTrue(v("10", "0", YearMonth.of(2026, 11)).hasErrors)
+    }
+
+    /** Khader's real case: August 2026 payslip 9.55 / 2.50 / 2.08 / 9.13 and leaves 16/07, 03/08 (½), 04/08. */
+    @Test fun realAugust2026Payslip() {
+        val st = Rules.validateSettings(Rules.SettingsInput("", "9.55", "2.50", YearMonth.of(2026, 8), weekend), today).settings!!
+        val data = AppData(st, listOf(
+            entry("a", LeaveType.HOLIDAY, "2026-07-16", "2026-07-16", 100),
+            entry("b", LeaveType.HOLIDAY, "2026-08-03", "2026-08-03", 50),
+            entry("c", LeaveType.HOLIDAY, "2026-08-04", "2026-08-04", 100),
+        ))
+        val s = Rules.summarize(data, today) // 28 Sep 2026
+        val aug = s.row(YearMonth.of(2026, 8))!!
+        assertEquals(listOf("9.55", "2.50", "2.08", "9.13"),
+            listOf(aug.previousX100, aug.accountedX100, aug.acquiredX100, aug.remainingX100).map { Rules.fmtSlip(it) })
+        assertEquals(250, s.recordedOnOpeningSlipX100) // matches the payslip's «Accounted»
+        val sep = s.row(YearMonth.of(2026, 9))!!
+        assertEquals("9.13", Rules.fmtSlip(sep.previousX100))
+        assertEquals("11.21", Rules.fmtSlip(sep.remainingX100))
+        assertEquals(1121, s.availableX100)
+        val oct = s.row(YearMonth.of(2026, 10))!!    // next month always shown (expected)
+        assertTrue(oct.projected)
+        assertEquals("13.29", Rules.fmtSlip(oct.remainingX100))
     }
 
     @Test fun calendarMarksSkipWeekendInsideRange() {

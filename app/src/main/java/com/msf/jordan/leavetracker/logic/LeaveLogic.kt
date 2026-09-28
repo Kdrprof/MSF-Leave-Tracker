@@ -75,11 +75,18 @@ data class LeaveEntry(
 
 data class AppSettings(
     val name: String,
-    /** «Remaining» on the payslip of [openingMonth]. */
+    /** «Remaining» on the payslip of [openingMonth] (= previous − accounted + 2.08). */
     val openingBalanceX100: Int,
     val openingMonth: YearMonth,
     val weekend: Set<DayOfWeek>,
-)
+    /** «Previous balance» printed on that payslip (null for data saved by older versions). */
+    val slipPreviousX100: Int? = null,
+    /** «Accounted this month» printed on that payslip. */
+    val slipAccountedX100: Int? = null,
+) {
+    /** True when the reference payslip was entered box by box (current setup screen). */
+    val hasSlipDetails: Boolean get() = slipPreviousX100 != null && slipAccountedX100 != null
+}
 
 data class AppData(
     val settings: AppSettings?,
@@ -133,7 +140,11 @@ data class Summary(
     val usedThisYear: Map<LeaveType, Int>,
     val totalThisYearX100: Int,
     val upcoming: List<LeaveEntry>,
-)
+    /** Holidays recorded in the app that belong to the reference payslip (to compare with its «Accounted»). */
+    val recordedOnOpeningSlipX100: Int = 0,
+) {
+    fun row(month: YearMonth): LedgerRow? = rows.firstOrNull { it.month == month }
+}
 
 object Rules {
 
@@ -291,12 +302,22 @@ object Rules {
 
     data class SettingsInput(
         val name: String,
-        val openingBalanceText: String,
+        /** «Previous balance» box of the payslip. */
+        val previousText: String,
+        /** «Accounted this month» box of the payslip. */
+        val accountedText: String,
         val openingMonth: YearMonth,
         val weekend: Set<DayOfWeek>,
     )
 
-    data class SettingsValidation(val issues: List<Issue>, val settings: AppSettings?, val balanceInvalid: Boolean) {
+    data class SettingsValidation(
+        val issues: List<Issue>,
+        val settings: AppSettings?,
+        val previousInvalid: Boolean,
+        val accountedInvalid: Boolean,
+        /** Live «Remaining» = previous − accounted + 2.08 (null while a box is invalid). */
+        val remainingX100: Int?,
+    ) {
         val hasErrors: Boolean get() = issues.any { it.level == IssueLevel.ERROR }
     }
 
@@ -304,33 +325,62 @@ object Rules {
         val issues = mutableListOf<Issue>()
         val name = input.name.trim()
         if (name.length > 60) issues += Issue(IssueLevel.ERROR, tr("الاسم طويل جداً (الحد 60 حرف).", "Name is too long (max 60)."))
-        val bal = parseDaysX100(input.openingBalanceText)
-        var balanceInvalid = false
+
+        val prev = parseDaysX100(input.previousText)
+        var prevInvalid = false
         when {
-            input.openingBalanceText.isBlank() -> {
-                balanceInvalid = true
+            input.previousText.isBlank() -> {
+                prevInvalid = true
                 issues += Issue(IssueLevel.ERROR, tr(
-                    "اكتب الرصيد كما يظهر في خانة Remaining في آخر سليب (مثال: 9.13).",
-                    "Type the «Remaining» value from your latest payslip (e.g. 9.13).",
+                    "اكتب «الرصيد السابق» (Previous balance) كما في السليب، مثال: 9.55.",
+                    "Type «Previous balance» from the payslip, e.g. 9.55.",
                 ))
             }
-            bal == null -> {
-                balanceInvalid = true
+            prev == null -> {
+                prevInvalid = true
                 issues += Issue(IssueLevel.ERROR, tr(
-                    "الرصيد يجب أن يكون رقماً مثل 9 أو 9.5 أو 9.13 (بحد أقصى خانتين بعد الفاصلة).",
-                    "Balance must be a number like 9, 9.5 or 9.13 (max 2 decimals).",
+                    "«الرصيد السابق» يجب أن يكون رقماً مثل 9 أو 9.55 (خانتين بعد الفاصلة كحد أقصى).",
+                    "«Previous balance» must be a number like 9 or 9.55 (max 2 decimals).",
                 ))
             }
-            bal < MIN_BALANCE_X100 || bal > MAX_BALANCE_X100 -> {
-                balanceInvalid = true
+            prev < MIN_BALANCE_X100 || prev > MAX_BALANCE_X100 -> {
+                prevInvalid = true
                 issues += Issue(IssueLevel.ERROR, tr(
-                    "الرصيد (${fmtDays(bal)}) غير منطقي. المسموح بين ${fmtDays(MIN_BALANCE_X100)} و ${fmtDays(MAX_BALANCE_X100)}.",
-                    "Balance (${fmtDays(bal)}) is not realistic. Allowed ${fmtDays(MIN_BALANCE_X100)} to ${fmtDays(MAX_BALANCE_X100)}.",
+                    "«الرصيد السابق» (${fmtDays(prev)}) غير منطقي. المسموح بين ${fmtDays(MIN_BALANCE_X100)} و ${fmtDays(MAX_BALANCE_X100)}.",
+                    "«Previous balance» (${fmtDays(prev)}) is not realistic (${fmtDays(MIN_BALANCE_X100)} to ${fmtDays(MAX_BALANCE_X100)}).",
                 ))
             }
-            bal < 0 -> issues += Issue(IssueLevel.WARNING, tr("الرصيد سالب. تأكد من الرقم في السليب.", "Balance is negative. Check your payslip."))
-            bal > 4500 -> issues += Issue(IssueLevel.WARNING, tr("الرصيد أعلى من 45 يوم، وهو مرتفع. تأكد من الرقم.", "Balance is above 45 days. Please double-check."))
         }
+
+        val acc = if (input.accountedText.isBlank()) 0 else parseDaysX100(input.accountedText)
+        var accInvalid = false
+        when {
+            acc == null -> {
+                accInvalid = true
+                issues += Issue(IssueLevel.ERROR, tr(
+                    "«المحتسب هذا الشهر» يجب أن يكون رقماً مثل 0 أو 2.50.",
+                    "«Accounted this month» must be a number like 0 or 2.50.",
+                ))
+            }
+            acc < 0 || acc > 3100 -> {
+                accInvalid = true
+                issues += Issue(IssueLevel.ERROR, tr(
+                    "«المحتسب هذا الشهر» يجب أن يكون بين 0 و 31.",
+                    "«Accounted this month» must be between 0 and 31.",
+                ))
+            }
+            acc % 50 != 0 -> issues += Issue(IssueLevel.WARNING, tr(
+                "عادةً يكون «المحتسب» بمضاعفات النصف (مثل 2.50). تأكد من الرقم.",
+                "«Accounted» is usually in halves (like 2.50). Please double-check.",
+            ))
+        }
+
+        val remaining = if (prev != null && !prevInvalid && acc != null && !accInvalid) prev - acc + ACCRUAL_X100 else null
+        if (remaining != null) {
+            if (remaining < 0) issues += Issue(IssueLevel.WARNING, tr("«المتبقي» سالب. تأكد من أرقام السليب.", "«Remaining» is negative. Check the payslip numbers."))
+            if (remaining > 4500) issues += Issue(IssueLevel.WARNING, tr("«المتبقي» أعلى من 45 يوم. تأكد من الأرقام.", "«Remaining» is above 45 days. Please double-check."))
+        }
+
         val current = YearMonth.from(today)
         if (input.openingMonth.isAfter(current)) {
             issues += Issue(IssueLevel.ERROR, tr("شهر السليب لا يمكن أن يكون في المستقبل.", "Payslip month can't be in the future."))
@@ -340,8 +390,14 @@ object Rules {
         if (input.weekend.size > 3) issues += Issue(IssueLevel.ERROR, tr("لا يمكن اختيار أكثر من 3 أيام عطلة.", "Pick at most 3 weekend days."))
         if (input.weekend.isEmpty()) issues += Issue(IssueLevel.WARNING, tr("لم تختر أي يوم عطلة أسبوعية.", "No weekend day selected."))
 
-        val ok = issues.none { it.level == IssueLevel.ERROR } && bal != null
-        return SettingsValidation(issues, if (ok) AppSettings(name, bal!!, input.openingMonth, input.weekend) else null, balanceInvalid)
+        val ok = issues.none { it.level == IssueLevel.ERROR } && remaining != null
+        return SettingsValidation(
+            issues = issues,
+            settings = if (ok) AppSettings(name, remaining!!, input.openingMonth, input.weekend, prev, acc) else null,
+            previousInvalid = prevInvalid,
+            accountedInvalid = accInvalid,
+            remainingX100 = remaining,
+        )
     }
 
     // ---------- Totals & balance ----------
@@ -365,16 +421,23 @@ object Rules {
         if (s == null) return Summary(current, 0, 0, 0, 0, emptyList(), usedThisYear, totalThisYear, upcoming)
 
         val deductions = HashMap<YearMonth, Int>()
+        var recordedOnOpening = 0
         for (e in data.entries) {
             if (!e.type.onPayslip) continue
             val m = payslipMonth(e.start)
-            if (!m.isAfter(s.openingMonth)) continue // already inside the opening balance
+            if (m == s.openingMonth) recordedOnOpening += e.daysX100
+            if (!m.isAfter(s.openingMonth)) continue // already inside the reference payslip
             deductions[m] = (deductions[m] ?: 0) + e.daysX100
         }
-        var lastMonth = current
+        // Always show at least next month's expected payslip.
+        var lastMonth = current.plusMonths(1)
         deductions.keys.maxOrNull()?.let { if (it.isAfter(lastMonth)) lastMonth = it }
 
         val rows = mutableListOf<LedgerRow>()
+        if (s.hasSlipDetails) {
+            // The reference payslip itself, exactly as printed.
+            rows += LedgerRow(s.openingMonth, s.slipPreviousX100!!, s.slipAccountedX100!!, ACCRUAL_X100, s.openingBalanceX100, false)
+        }
         var remaining = s.openingBalanceX100
         var currentSlip = s.openingBalanceX100
         var m = s.openingMonth.plusMonths(1)
@@ -398,6 +461,7 @@ object Rules {
             usedThisYear = usedThisYear,
             totalThisYearX100 = totalThisYear,
             upcoming = upcoming,
+            recordedOnOpeningSlipX100 = recordedOnOpening,
         )
     }
 

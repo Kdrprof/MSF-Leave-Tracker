@@ -51,84 +51,57 @@ import java.time.YearMonth
 fun PayslipScreen(vm: AppViewModel) {
     val s = Rules.summarize(vm.data, vm.today())
     val settings = vm.data.settings
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item(key = "head") {
-            Spacer(Modifier.height(12.dp))
-            Text(tr("الإجازة السنوية في سليب الراتب", "Paid leave on the payslip"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Hint(tr(
-                "نفس خانات السليب (Paid leave). الإجازة السنوية (Holiday) فقط تظهر هنا. طابق خانة «المتبقي» مع سليبك.",
-                "Same boxes as the payslip (Paid leave). Only Holiday appears here. Compare «Remaining» with your payslip.",
-            ))
-            if (settings != null) {
-                Hint(tr(
-                    "البداية: ${Rules.fmtSlip(settings.openingBalanceX100)} (خانة Remaining في سليب ${Tr.monthLabel(settings.openingMonth)}).",
-                    "Start: ${Rules.fmtSlip(settings.openingBalanceX100)} («Remaining» on the ${Tr.monthLabel(settings.openingMonth)} payslip).",
-                ))
-            }
-            Spacer(Modifier.height(12.dp))
-            SlipRow(
-                tr("الشهر", "Month"),
-                tr("السابق\nPrevious", "Previous\nbalance"),
-                tr("المحتسب\nAccounted", "Accounted\nthis month"),
-                tr("المكتسب\nAcquired", "Acquired\nthis month"),
-                tr("المتبقي\nRemaining", "Remaining"),
-                header = true, highlight = false, projected = false,
-            )
-            HorizontalDivider()
-        }
-        if (s.rows.isEmpty()) {
-            item(key = "empty") {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    tr("لا يوجد سليب بعد شهر الرصيد الافتتاحي حتى الآن.", "No payslip after the opening month yet."),
-                    Modifier.padding(vertical = 16.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tr("الإجازة السنوية في سليب الراتب", "Paid leave on the payslip"),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                HelpIcon(
+                    tr("كيف تُقرأ هذه الصفحة؟", "How to read this page"),
+                    tr(
+                        "كل بطاقة = سليب شهر، بنفس خانات مربع Paid leave.\n\nالمتبقي = السابق − المحتسب + المكتسب (2.08).\n\nالمحتسب = الإجازات السنوية التي يبدأ أول يوم فيها من 16 الشهر الماضي حتى 15 هذا الشهر، وتُحسب كاملة بدون تقسيم.\n\nأول بطاقة (المرجع) منقولة من سليبك الورقي كما أدخلتها في الإعدادات. الإجازات الأخرى (مرضية، شخصية…) لا تظهر هنا.",
+                        "Each card = one month's payslip, same boxes as Paid leave.\n\nRemaining = Previous − Accounted + Acquired (2.08).\n\nAccounted = holidays whose first day is from the 16th of last month to the 15th of this month, counted whole.\n\nThe reference card is copied from your paper payslip (Settings). Other leave types never appear here.",
+                    ),
                 )
             }
         }
+        if (settings != null && !settings.hasSlipDetails) {
+            item(key = "upgrade") {
+                IssueBox(com.msf.jordan.leavetracker.logic.Issue(com.msf.jordan.leavetracker.logic.IssueLevel.WARNING, tr(
+                    "حدّث بيانات السليب من الإعدادات (الرصيد السابق + المحتسب) حتى تطابق الأرقام سليبك.",
+                    "Update the payslip details in Settings (Previous + Accounted) so the numbers match your payslip.",
+                )))
+            }
+        }
+        if (s.rows.isEmpty()) {
+            item(key = "empty") {
+                Text(tr("لا يوجد بيانات بعد.", "No data yet."), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         items(s.rows.reversed(), key = { it.month.toString() }) { r ->
-            SlipRow(
-                Tr.monthLabel(r.month) + if (r.projected) tr("\n(متوقع)", "\n(expected)") else "",
-                Rules.fmtSlip(r.previousX100),
-                Rules.fmtSlip(r.accountedX100),
-                Rules.fmtSlip(r.acquiredX100),
-                Rules.fmtSlip(r.remainingX100),
-                header = false,
+            val isRef = settings != null && r.month == settings.openingMonth
+            val badge = when {
+                isRef -> tr("مرجع من سليبك", "From your payslip")
+                r.month.isAfter(s.currentMonth.minusMonths(1)) -> tr("متوقع", "Expected")
+                else -> tr("صادر", "Issued")
+            }
+            SlipCard(
+                Tr.monthLabel(r.month),
+                badge,
+                if (r.month.isAfter(s.currentMonth.minusMonths(1))) r.copy(projected = true) else r,
                 highlight = r.month == s.currentMonth,
-                projected = r.projected,
+                note = if (isRef && settings!!.hasSlipDetails && s.recordedOnOpeningSlipX100 != settings.slipAccountedX100) tr(
+                    "المسجّل في التطبيق لهذا السليب: ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}",
+                    "Recorded in the app for this payslip: ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}",
+                ) else null,
             )
-            HorizontalDivider()
         }
-        item(key = "foot") {
-            Spacer(Modifier.height(8.dp))
-            Hint(tr(
-                "المتبقي = السابق − المحتسب + المكتسب (2.08). الأشهر «المتوقعة» فيها إجازات مخططة.",
-                "Remaining = Previous − Accounted + Acquired (2.08). «Expected» months contain planned leaves.",
-            ))
-            Spacer(Modifier.height(80.dp))
-        }
-    }
-}
-
-@Composable
-private fun SlipRow(month: String, prev: String, acc: String, acq: String, rem: String, header: Boolean, highlight: Boolean, projected: Boolean) {
-    val w = if (header || highlight) FontWeight.Bold else FontWeight.Normal
-    val size = if (header) 11.sp else 14.sp
-    val alpha = if (projected) 0.6f else 1f
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(if (highlight) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
-            .padding(vertical = 10.dp, horizontal = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val c = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
-        Text(month, Modifier.weight(1.5f), fontWeight = w, fontSize = if (header) 11.sp else 13.sp, color = c)
-        Text(prev, Modifier.weight(1f), fontWeight = w, fontSize = size, textAlign = TextAlign.Center, color = c)
-        Text(acc, Modifier.weight(1f), fontWeight = w, fontSize = size, textAlign = TextAlign.Center,
-            color = if (header) c else MaterialTheme.colorScheme.error.copy(alpha = alpha))
-        Text(acq, Modifier.weight(1f), fontWeight = w, fontSize = size, textAlign = TextAlign.Center,
-            color = if (header) c else Color(0xFF10B981).copy(alpha = alpha))
-        Text(rem, Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = size, textAlign = TextAlign.Center, color = c)
+        item(key = "foot") { Spacer(Modifier.height(80.dp)) }
     }
 }
 
@@ -160,7 +133,11 @@ fun CalendarScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit) {
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
                     .padding(10.dp),
             ) {
-                Text(tr("المرجع (مجموع السنة)", "Legend (year totals)"), fontWeight = FontWeight.Bold)
+                FieldHeader(
+                    tr("المرجع (مجموع السنة)", "Legend (year totals)"),
+                    tr("كل لون = نوع إجازة، والرقم = مجموع أيامه في هذه السنة. نصف اليوم يظهر بلون أفتح مع ½. اضغط على أي يوم ملوّن لرؤية الإجازة وتعديلها.",
+                        "Each color = a leave type; the number = its total days this year. Half days are lighter with ½. Tap a colored day to see and edit the leave."),
+                )
                 LeaveType.entries.chunked(2).forEach { row ->
                     Row {
                         row.forEach { t ->
@@ -176,7 +153,6 @@ fun CalendarScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit) {
                         }
                     }
                 }
-                Hint(tr("اضغط على أي يوم ملوّن لرؤية تفاصيله.", "Tap a colored day to see its details."))
             }
             Spacer(Modifier.height(8.dp))
         }

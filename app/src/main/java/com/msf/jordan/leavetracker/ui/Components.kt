@@ -34,6 +34,14 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import com.msf.jordan.leavetracker.logic.LedgerRow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -98,18 +106,106 @@ fun Hint(text: String, modifier: Modifier = Modifier) {
     }
 }
 
+/** Round «?» button. Tapping it opens a short explanation (same look everywhere in the app). */
 @Composable
-fun SectionCard(title: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+fun HelpIcon(title: String, text: String) {
+    var open by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .padding(horizontal = 4.dp)
+            .size(26.dp)
+            .border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape)
+            .clickable { open = true },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("?", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+    }
+    if (open) {
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text(title) },
+            text = { Text(text) },
+            confirmButton = { TextButton(onClick = { open = false }) { Text(tr("فهمت", "Got it")) } },
+        )
+    }
+}
+
+/** Label of a field with an optional «?» help button next to it. */
+@Composable
+fun FieldHeader(label: String, help: String? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+        Text(label, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
+        if (help != null) HelpIcon(label, help)
+    }
+}
+
+@Composable
+fun SectionCard(title: String, modifier: Modifier = Modifier, help: String? = null, content: @Composable () -> Unit) {
     Card(
         modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                if (help != null) HelpIcon(title, help)
+            }
             Spacer(Modifier.height(8.dp))
             content()
         }
+    }
+}
+
+/**
+ * One payslip drawn like the «Paid leave» box of the real payslip:
+ * Previous balance | Accounted this month | Acquired this month | Remaining.
+ */
+@Composable
+fun SlipCard(title: String, badge: String, row: LedgerRow, highlight: Boolean = false, note: String? = null) {
+    val border = if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .border(if (highlight) 2.dp else 1.dp, border, RoundedCornerShape(14.dp))
+            .background(
+                if (row.projected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                RoundedCornerShape(14.dp),
+            )
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(title, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Text(
+                badge,
+                fontSize = 11.sp,
+                color = if (row.projected) Amber else MaterialTheme.colorScheme.secondary,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .border(1.dp, if (row.projected) Amber else MaterialTheme.colorScheme.secondary, RoundedCornerShape(50))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth()) {
+            SlipCell(tr("الرصيد\nالسابق", "Previous\nbalance"), Rules.fmtSlip(row.previousX100), MaterialTheme.colorScheme.onSurface, false)
+            SlipCell(tr("المحتسب\nهذا الشهر", "Accounted\nthis month"), Rules.fmtSlip(row.accountedX100), MaterialTheme.colorScheme.error, true)
+            SlipCell(tr("المكتسب\nهذا الشهر", "Acquired\nthis month"), Rules.fmtSlip(row.acquiredX100), MaterialTheme.colorScheme.secondary, false)
+            SlipCell(tr("المتبقي", "Remaining"), Rules.fmtSlip(row.remainingX100), MaterialTheme.colorScheme.onSurface, true)
+        }
+        if (note != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.SlipCell(label: String, value: String, color: Color, bold: Boolean) {
+    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 10.sp, lineHeight = 12.sp, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+        Spacer(Modifier.height(4.dp))
+        Text(value, fontSize = 17.sp, fontWeight = if (bold) FontWeight.ExtraBold else FontWeight.Medium, color = color, maxLines = 1)
     }
 }
 

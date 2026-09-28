@@ -34,6 +34,8 @@ object JsonCodec {
             o.put("name", s.name)
             o.put("openingBalanceX100", s.openingBalanceX100)
             o.put("openingMonth", s.openingMonth.toString())
+            s.slipPreviousX100?.let { o.put("slipPreviousX100", it) }
+            s.slipAccountedX100?.let { o.put("slipAccountedX100", it) }
             val w = JSONArray()
             s.weekend.sortedBy { it.value }.forEach { w.put(it.value) }
             o.put("weekend", w)
@@ -80,7 +82,15 @@ object JsonCodec {
                         if (v in 1..7) weekend += DayOfWeek.of(v)
                     }
                 } else weekend += Rules.DEFAULT_WEEKEND
-                settings = AppSettings(so.optString("name", "").take(60), bal, month, weekend)
+                val prev = if (so.has("slipPreviousX100")) so.getInt("slipPreviousX100") else null
+                val acc = if (so.has("slipAccountedX100")) so.getInt("slipAccountedX100") else null
+                // Keep slip details only if they are consistent with the stored «Remaining».
+                val consistent = prev != null && acc != null && prev - acc + com.msf.jordan.leavetracker.logic.ACCRUAL_X100 == bal
+                settings = AppSettings(
+                    so.optString("name", "").take(60), bal, month, weekend,
+                    if (consistent) prev else null,
+                    if (consistent) acc else null,
+                )
             } catch (e: Exception) {
                 throw BackupFormatException(tr("إعدادات النسخة الاحتياطية تالفة.", "Backup settings are damaged."))
             }

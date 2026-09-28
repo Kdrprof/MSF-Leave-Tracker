@@ -15,6 +15,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -46,7 +47,7 @@ import com.msf.jordan.leavetracker.logic.tr
 import java.time.YearMonth
 
 @Composable
-fun HomeScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit) {
+fun HomeScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit, onOpenSettings: () -> Unit) {
     val data = vm.data
     val today = vm.today()
     val s = Rules.summarize(data, today)
@@ -96,12 +97,44 @@ fun HomeScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit) {
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider(color = Color.White.copy(alpha = 0.25f))
                 Spacer(Modifier.height(8.dp))
-                BalanceLine(tr("المتوقع في سليب ${Tr.monthLabel(s.currentMonth)}", "Expected on ${Tr.monthLabel(s.currentMonth)} payslip"), Rules.fmtSlip(s.currentSlipX100))
-                BalanceLine(tr("سيُخصم في سليب ${Tr.monthLabel(s.currentMonth.plusMonths(1))}", "To deduct on ${Tr.monthLabel(s.currentMonth.plusMonths(1))} payslip"), Rules.fmtSlip(s.nextSlipDeductionX100))
-                if (s.pendingFutureX100 != s.nextSlipDeductionX100) {
-                    BalanceLine(tr("مجموع الخصومات المؤجلة", "All future deductions"), Rules.fmtSlip(s.pendingFutureX100))
-                }
+                BalanceLine(tr("خصومات قادمة مسجلة", "Recorded future deductions"), Rules.fmtSlip(s.pendingFutureX100))
                 BalanceLine(tr("المكتسب شهرياً", "Acquired every month"), "+" + Rules.fmtSlip(ACCRUAL_X100))
+            }
+        }
+
+        val st = data.settings
+        if (st != null && !st.hasSlipDetails) {
+            // Data from the first version: only one number was saved, which is ambiguous.
+            IssueBox(Issue(IssueLevel.WARNING, tr(
+                "مهم: حدّث بيانات السليب في الإعدادات. أصبح التطبيق يطلب «الرصيد السابق» و«المحتسب هذا الشهر» من السليب ليطابق حسابه سليبك تماماً.",
+                "Important: update your payslip details in Settings. The app now asks for «Previous balance» and «Accounted this month» so it matches your payslip exactly.",
+            )))
+            Button(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) { Text(tr("تحديث بيانات السليب", "Update payslip details")) }
+        }
+        if (st != null && st.hasSlipDetails && s.recordedOnOpeningSlipX100 != st.slipAccountedX100) {
+            IssueBox(Issue(IssueLevel.INFO, tr(
+                "للتحقق: الإجازات السنوية المسجلة في التطبيق لسليب ${Tr.monthLabel(st.openingMonth)} = ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}، والسليب يقول ${Rules.fmtSlip(st.slipAccountedX100 ?: 0)}. الحساب يعتمد رقم السليب، فلا مشكلة إن لم تسجّل إجازات ذلك الشهر.",
+                "Check: holidays recorded for the ${Tr.monthLabel(st.openingMonth)} payslip = ${Rules.fmtSlip(s.recordedOnOpeningSlipX100)}, the payslip says ${Rules.fmtSlip(st.slipAccountedX100 ?: 0)}. The payslip number is used, so it's fine if you didn't record that month.",
+            )))
+        }
+
+        // Payslips: previous (issued) + this month + next month (expected)
+        val prevRow = s.row(s.currentMonth.minusMonths(1))
+        val curRow = s.row(s.currentMonth)
+        val nextRow = s.row(s.currentMonth.plusMonths(1))
+        if (prevRow != null || curRow != null || nextRow != null) {
+            SectionCard(
+                tr("سليبات الراتب (الإجازة السنوية)", "Payslips (paid leave)"),
+                help = tr(
+                    "نفس مربع Paid leave في سليبك.\n\n• الرصيد السابق: المتبقي من السليب الذي قبله.\n• المحتسب هذا الشهر: الإجازات السنوية التي تبدأ من 16 الشهر الماضي حتى 15 هذا الشهر.\n• المكتسب: 2.08 ثابت.\n• المتبقي = السابق − المحتسب + المكتسب.\n\n«صادر» = سليب استلمته. «متوقع» = حسب إجازاتك المسجلة.",
+                    "Same as the Paid leave box on your payslip.\n\n• Previous balance: Remaining of the payslip before.\n• Accounted: holidays starting 16th of last month to 15th of this month.\n• Acquired: fixed 2.08.\n• Remaining = Previous − Accounted + Acquired.\n\n«Issued» = a payslip you received. «Expected» = from your recorded leaves.",
+                ),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (prevRow != null) SlipCard(tr("الشهر السابق: ", "Last month: ") + Tr.monthLabel(prevRow.month), tr("صادر", "Issued"), prevRow)
+                    if (curRow != null) SlipCard(tr("هذا الشهر: ", "This month: ") + Tr.monthLabel(curRow.month), tr("متوقع", "Expected"), curRow.copy(projected = true), highlight = true)
+                    if (nextRow != null) SlipCard(tr("الشهر القادم: ", "Next month: ") + Tr.monthLabel(nextRow.month), tr("متوقع", "Expected"), nextRow)
+                }
             }
         }
 
@@ -112,14 +145,19 @@ fun HomeScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit) {
             )))
         }
 
-        SectionCard(tr("مجموع إجازاتك في ${today.year}", "Your leaves in ${today.year}")) {
+        SectionCard(
+            tr("مجموع إجازاتك في ${today.year}", "Your leaves in ${today.year}"),
+            help = tr(
+                "مجموع كل نوع حسب تاريخ أول يوم في الإجازة. الإجازة السنوية فقط تُخصم من الرصيد، وباقي الأنواع للتوثيق والمجاميع.",
+                "Totals per type by the leave's first day. Only Holiday is deducted from the balance; other types are for records and totals.",
+            ),
+        ) {
             TypeTotalRows(s.usedThisYear)
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(tr("المجموع الكلي", "Grand total"), Modifier.weight(1f), fontWeight = FontWeight.Bold)
                 Text(daysText(s.totalThisYearX100), fontWeight = FontWeight.Bold)
             }
-            Hint(tr("حسب تاريخ أول يوم في الإجازة. الإجازة السنوية فقط تُخصم من الرصيد.", "By the leave's first day. Only Holiday is deducted from the balance."))
         }
 
         SectionCard(tr("هذا الشهر: ${Tr.monthLabel(YearMonth.from(today))}", "This month: ${Tr.monthLabel(YearMonth.from(today))}")) {
@@ -134,7 +172,7 @@ fun HomeScreen(vm: AppViewModel, onOpenEntry: (String) -> Unit) {
         SectionCard(tr("الإجازات القادمة", "Upcoming leaves")) {
             if (s.upcoming.isEmpty()) {
                 Text(tr("لا يوجد إجازات مخططة.", "No planned leaves."), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Hint(tr("اضغط «إضافة إجازة» بالأسفل للإدخال اليدوي أو لتصوير نموذج الطلب.", "Tap «Add leave» below to type it in or scan the request form."))
+                Text(tr("اضغط «إضافة إجازة» بالأسفل للإدخال اليدوي أو لتصوير نموذج الطلب.", "Tap «Add leave» below to type it in or scan the request form."), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 s.upcoming.take(5).forEach { e -> EntryRow(e, onClick = { onOpenEntry(e.id) }, openingMonth = data.settings?.openingMonth) }
             }

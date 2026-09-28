@@ -344,7 +344,7 @@ private fun MainScaffold(
             key(vm.refreshTick) {
                 Box(Modifier.fillMaxSize()) {
                     when (tab) {
-                        Tab.HOME -> HomeScreen(vm, onOpenEntry = onEdit)
+                        Tab.HOME -> HomeScreen(vm, onOpenEntry = onEdit, onOpenSettings = { onTab(Tab.SETTINGS) })
                         Tab.HISTORY -> HistoryScreen(vm, onOpenEntry = onEdit, onDeleted = onDeleted)
                         Tab.CALENDAR -> CalendarScreen(vm, onOpenEntry = onEdit)
                         Tab.PAYSLIP -> PayslipScreen(vm)

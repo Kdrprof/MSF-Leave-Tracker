@@ -2,6 +2,9 @@ package com.msf.jordan.leavetracker.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -71,7 +74,10 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
     val defaultMonth = YearMonth.from(today).minusMonths(1)
 
     var name by rememberSaveable(current) { mutableStateOf(current?.name.orEmpty()) }
-    var balance by rememberSaveable(current) { mutableStateOf(current?.let { Rules.fmtSlip(it.openingBalanceX100) }.orEmpty()) }
+    var previous by rememberSaveable(current) {
+        mutableStateOf(current?.slipPreviousX100?.let { Rules.fmtSlip(it) } ?: current?.let { Rules.fmtSlip(it.openingBalanceX100) }.orEmpty())
+    }
+    var accounted by rememberSaveable(current) { mutableStateOf(current?.slipAccountedX100?.let { Rules.fmtSlip(it) }.orEmpty()) }
     var monthText by rememberSaveable(current) { mutableStateOf((current?.openingMonth ?: defaultMonth).toString()) }
     var weekendText by rememberSaveable(current) {
         mutableStateOf((current?.weekend ?: Rules.DEFAULT_WEEKEND).map { it.value }.sorted().joinToString(","))
@@ -81,52 +87,25 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
 
     val month = runCatching { YearMonth.parse(monthText) }.getOrDefault(defaultMonth)
     val weekend = weekendText.split(',').mapNotNull { it.toIntOrNull() }.filter { it in 1..7 }.map { DayOfWeek.of(it) }.toSet()
-    val v = Rules.validateSettings(Rules.SettingsInput(name, balance, month, weekend), today)
+    val v = Rules.validateSettings(Rules.SettingsInput(name, previous, accounted, month, weekend), today)
 
     fun save() {
         val s = v.settings ?: return
         if (vm.saveSettings(s)) {
-            vm.toast(tr("تم حفظ البيانات ✔", "Saved ✔"))
+            vm.toast(tr("تم حفظ البيانات ✔ وتحدّثت الحسابات", "Saved ✔ — balance recalculated"))
             onSaved()
         }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionCard(if (firstRun) tr("إعداد الرصيد (مرة واحدة فقط)", "Set your balance (one time)") else tr("بياناتي والرصيد", "My details & balance")) {
-            if (firstRun) {
-                Text(tr(
-                    "افتح آخر سليب راتب، وفي مربع Paid leave انسخ رقم Remaining. بعدها يحسب التطبيق كل شيء تلقائياً.",
-                    "Open your latest payslip and copy «Remaining» from the Paid leave box. The app calculates everything after that.",
-                ))
-                Spacer(Modifier.height(10.dp))
-            }
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it.take(60) },
-                label = { Text(tr("اسمك (اختياري)", "Your name (optional)")) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Hint(tr("يظهر في الرئيسية وفي الكشوفات التي تشاركها.", "Shown on the home screen and on shared statements."))
-            Spacer(Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = balance,
-                onValueChange = { balance = it.take(8) },
-                label = { Text(tr("الرصيد المتبقي (Remaining) في آخر سليب", "«Remaining» on your latest payslip")) },
-                placeholder = { Text(tr("مثال: 9.13", "e.g. 9.13")) },
-                singleLine = true,
-                isError = tried && v.balanceInvalid,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Hint(tr(
-                "الرقم الأخير في مربع Paid leave (مثل 9.13). مسموح بالكسور والأرقام العربية.",
-                "The last number in the Paid leave box (like 9.13). Decimals allowed.",
-            ))
-            Spacer(Modifier.height(12.dp))
-
-            Text(tr("شهر ذلك السليب", "Month of that payslip"), fontWeight = FontWeight.Bold)
+        SectionCard(
+            if (firstRun) tr("انسخ آخر سليب راتب (مرة واحدة)", "Copy your latest payslip (one time)") else tr("آخر سليب راتب (المرجع)", "Latest payslip (reference)"),
+            help = tr(
+                "افتح آخر سليب راتب استلمته، وابحث عن مربع Paid leave، وانسخ منه:\n• Previous balance ← الرصيد السابق\n• Accounted this month ← المحتسب هذا الشهر\n\nالتطبيق يحسب «المتبقي» تلقائياً (السابق − المحتسب + 2.08). طابقه مع خانة Remaining في السليب؛ إذا تطابق فكل حساباتك بعدها ستكون صحيحة.\n\nالإجازات السنوية التابعة لهذا السليب أو قبله لن تُخصم مرة ثانية.",
+                "Open your latest payslip, find the Paid leave box and copy:\n• Previous balance\n• Accounted this month\n\nThe app computes «Remaining» (Previous − Accounted + 2.08). Compare it with Remaining on the payslip; if it matches, everything after it will be correct.\n\nHolidays belonging to this payslip or earlier won't be deducted again.",
+            ),
+        ) {
+            FieldHeader(tr("شهر السليب", "Payslip month"), tr("الشهر المكتوب على السليب الذي تنسخ منه الأرقام (مثلاً سليب آب 2026).", "The month printed on the payslip you copy from (e.g. August 2026)."))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { monthText = month.minusMonths(1).toString() }) { Text(tr("السابق", "Prev")) }
                 Text(
@@ -139,13 +118,80 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
                     Text(tr("التالي", "Next"))
                 }
             }
-            Hint(tr(
-                "الإجازات السنوية التابعة لهذا السليب أو قبله محسوبة داخل الرصيد ولن تُخصم مرة ثانية. كل سليب بعده يضيف +2.08.",
-                "Holidays belonging to this payslip or earlier are already inside the balance. Each later payslip adds +2.08.",
-            ))
+            Spacer(Modifier.height(12.dp))
+
+            FieldHeader(
+                tr("الرصيد السابق (Previous balance)", "Previous balance"),
+                tr("أول رقم في مربع Paid leave. مثال من سليب آب 2026: 9.55", "First number in the Paid leave box. Example (Aug 2026): 9.55"),
+            )
+            OutlinedTextField(
+                value = previous,
+                onValueChange = { previous = it.take(8) },
+                placeholder = { Text("9.55") },
+                singleLine = true,
+                isError = tried && v.previousInvalid,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(10.dp))
+
+            FieldHeader(
+                tr("المحتسب هذا الشهر (Accounted this month)", "Accounted this month"),
+                tr("الرقم الثاني في المربع: الإجازات السنوية التي خُصمت في هذا السليب. اكتب 0 إذا لم يُخصم شيء. مثال: 2.50", "Second number in the box: holidays deducted on this payslip. Type 0 if none. Example: 2.50"),
+            )
+            OutlinedTextField(
+                value = accounted,
+                onValueChange = { accounted = it.take(6) },
+                placeholder = { Text("2.50") },
+                singleLine = true,
+                isError = tried && v.accountedInvalid,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // Live result — must equal «Remaining» on the payslip
+            val rem = v.remainingX100
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(tr("المتبقي المحسوب (Remaining)", "Calculated Remaining"), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text(
+                    if (rem == null) "—" else Rules.fmtSlip(rem),
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    tr("= السابق − المحتسب + 2.08 • يجب أن يساوي خانة Remaining في سليبك", "= Previous − Accounted + 2.08 • must equal Remaining on your payslip"),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
         }
 
-        SectionCard(tr("أيام عطلة نهاية الأسبوع", "Weekend days")) {
+        SectionCard(
+            tr("بياناتي", "My details"),
+            help = tr("اسمك يظهر في الرئيسية وفي كشوفات PDF التي تشاركها. اختياري.", "Your name appears on the home screen and shared PDFs. Optional."),
+        ) {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(60) },
+                label = { Text(tr("اسمك (اختياري)", "Your name (optional)")) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        SectionCard(
+            tr("أيام عطلة نهاية الأسبوع", "Weekend days"),
+            help = tr("في الأردن: الجمعة والسبت. تُستخدم فقط لاقتراح عدد أيام العمل وتلوين التقويم، ولا تغيّر الأيام التي تكتبها بنفسك.", "Jordan: Friday & Saturday. Only used to suggest working days and color the calendar; never changes the days you type."),
+        ) {
             val order = listOf(DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY)
             order.chunked(4).forEach { row ->
                 Row {
@@ -164,10 +210,6 @@ fun SettingsForm(vm: AppViewModel, firstRun: Boolean, onSaved: () -> Unit) {
                     if (row.size < 4) Spacer(Modifier.weight((4 - row.size).toFloat()))
                 }
             }
-            Hint(tr(
-                "في الأردن: الجمعة والسبت. تُستخدم فقط لاقتراح عدد الأيام وتلوين التقويم.",
-                "Jordan: Friday & Saturday. Only used to suggest days and color the calendar.",
-            ))
         }
 
         val shown = when {
@@ -258,7 +300,10 @@ fun SettingsScreen(vm: AppViewModel) {
 
         SettingsForm(vm, firstRun = false, onSaved = {})
 
-        SectionCard(tr("مشاركة كشف الإجازات (PDF)", "Share leave statement (PDF)")) {
+        SectionCard(
+            tr("مشاركة كشف الإجازات (PDF)", "Share leave statement (PDF)"),
+            help = tr("ملف PDF فيه الرصيد، مجموع كل نوع، مربعات السليب، وكل الإجازات بتواريخها. يُفتح على أي هاتف أو كمبيوتر بدون التطبيق — مناسب لإرساله للمدير.", "A PDF with your balance, totals per type, payslip boxes and every leave with dates. Opens anywhere without this app — ready for your manager."),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 OutlinedButton(onClick = { reportMonthText = reportMonth.minusMonths(1).toString() }) { Text(tr("السابق", "Prev")) }
                 Text(Tr.monthLabel(reportMonth), Modifier.weight(1f), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold)
@@ -274,13 +319,12 @@ fun SettingsScreen(vm: AppViewModel) {
                 onClick = { report(Sharing.shareReport(ctx, Reports.yearly(vm.data, reportMonth.year, today), reportMonth.year.toString())) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(tr("كشف سنة ${reportMonth.year} كاملة", "Full year ${reportMonth.year}")) }
-            Hint(tr(
-                "ملف PDF يُفتح على أي هاتف أو كمبيوتر بدون الحاجة للتطبيق — مناسب لإرساله للمدير.",
-                "A PDF that opens on any phone or computer without this app — ready for your manager.",
-            ))
         }
 
-        SectionCard(tr("النسخ الاحتياطي (مهم عند تغيير الهاتف)", "Backup (important when changing phones)")) {
+        SectionCard(
+            tr("النسخ الاحتياطي", "Backup"),
+            help = tr("بياناتك محفوظة على هذا الهاتف فقط. احفظ نسخة احتياطية أو أرسلها لنفسك، وعند تغيير الهاتف استخدم «استعادة». ستظهر رسالة تأكيد قبل استبدال بياناتك.", "Your data lives on this phone only. Save or send yourself a backup; on a new phone use «Restore». You'll confirm before anything is replaced."),
+        ) {
             Button(onClick = { exportLauncher.launch(Sharing.backupFileName()) }, modifier = Modifier.fillMaxWidth()) {
                 Text(tr("حفظ نسخة احتياطية في ملف", "Save a backup file"))
             }
@@ -293,14 +337,15 @@ fun SettingsScreen(vm: AppViewModel) {
                 onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*")) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(tr("استعادة من نسخة احتياطية", "Restore from backup")) }
-            Hint(tr("ستظهر رسالة تأكيد قبل استبدال بياناتك.", "You will be asked to confirm before your data is replaced."))
         }
 
-        SectionCard(tr("مشاركة التطبيق", "Share the app")) {
+        SectionCard(
+            tr("مشاركة التطبيق", "Share the app"),
+            help = tr("يرسل ملف التطبيق نفسه (APK) لزميلك عبر واتساب أو البلوتوث أو Nearby Share — يعمل بدون إنترنت.", "Sends the app file (APK) to a colleague via WhatsApp, Bluetooth or Nearby Share — works offline."),
+        ) {
             Button(onClick = { report(Sharing.shareApp(ctx)) }, modifier = Modifier.fillMaxWidth()) {
                 Text(tr("إرسال ملف التطبيق (APK)", "Send the app file (APK)"))
             }
-            Hint(tr("عبر واتساب أو البلوتوث أو Nearby Share — يعمل بدون إنترنت.", "Via WhatsApp, Bluetooth or Nearby Share — works offline."))
             if (BuildConfig.RELEASE_URL.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(onClick = { report(Sharing.shareLink(ctx)) }, modifier = Modifier.fillMaxWidth()) {
@@ -309,11 +354,13 @@ fun SettingsScreen(vm: AppViewModel) {
             }
         }
 
-        SectionCard(tr("منطقة الخطر", "Danger zone")) {
+        SectionCard(
+            tr("منطقة الخطر", "Danger zone"),
+            help = tr("يحذف الرصيد وكل الإجازات من هذا الهاتف نهائياً. احفظ نسخة احتياطية أولاً.", "Permanently removes the balance and all leaves from this phone. Back up first."),
+        ) {
             OutlinedButton(onClick = { confirmReset = 1 }, modifier = Modifier.fillMaxWidth()) {
                 Text(tr("حذف كل البيانات", "Delete all data"), color = MaterialTheme.colorScheme.error)
             }
-            Hint(tr("يحذف الرصيد وكل الإجازات من هذا الهاتف. احفظ نسخة احتياطية أولاً.", "Removes the balance and all leaves from this phone. Back up first."))
         }
 
         Text(
